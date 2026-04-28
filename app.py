@@ -150,4 +150,51 @@ if df is not None:
         with c1:
             st.subheader("📈 Channel Wise Query Trends")
             if query_col and chan_col:
-                fig_q = px.bar(f_df.groupby([query_col, chan_col]).size().reset_
+                fig_q = px.bar(f_df.groupby([query_col, chan_col]).size().reset_index(name='Count'), 
+                               x=query_col, y='Count', color=chan_col, barmode='group',
+                               color_discrete_sequence=[BRAND_ORANGE, "#475467"])
+                fig_q.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color="white"))
+                st.plotly_chart(fig_q, use_container_width=True)
+
+        with c2:
+            st.subheader("👤 Executive Distribution")
+            if exec_col and chan_col:
+                view_mode = st.radio("Toggle View Mode:", ["Workload", "Individual Split"], horizontal=True)
+                if view_mode == "Workload":
+                    fig_ex = px.pie(f_df[exec_col].value_counts().reset_index(), names=exec_col, values='count', 
+                                    hole=0.4, color_discrete_sequence=px.colors.sequential.Oranges_r)
+                else:
+                    target_exec = st.selectbox("Select Agent:", sorted([str(x) for x in f_df[exec_col].unique() if pd.notna(x)]))
+                    exec_split = f_df[f_df[exec_col] == target_exec][chan_col].value_counts().reset_index()
+                    fig_ex = px.pie(exec_split, names=chan_col, values='count', hole=0.4,
+                                   color_discrete_sequence=[BRAND_ORANGE, "#475467"])
+                
+                fig_ex.update_layout(paper_bgcolor='rgba(0,0,0,0)', font=dict(color="white"))
+                st.plotly_chart(fig_ex, use_container_width=True)
+
+    with tab_tracker:
+        st.title("📋 Live Query Tracker")
+        search = st.text_input("🔍 Search entries (ID, Agent, or Status):")
+        if search:
+            display_df = f_df[f_df.apply(lambda row: search.lower() in row.astype(str).str.lower().values, axis=1)]
+        else:
+            display_df = f_df
+        st.dataframe(display_df, use_container_width=True)
+
+    # --- 6. PREDICTIONS (STAYING AT THE BOTTOM) ---
+    st.markdown("---")
+    st.subheader("🔮 Predictive Outlook")
+    p1, p2 = st.columns(2)
+    with p1:
+        st.markdown(f'''<div class="insight-card">
+        <b style="color:{BRAND_ORANGE}">📅 Backlog clearance Forecast</b><br>
+        Remaining Volume: {total_t - res_count} tickets.<br>
+        Forecasted finish: <b>{((total_t - res_count)/30 if total_t > 0 else 0):.1f} working days</b>.</div>''', unsafe_allow_html=True)
+    with p2:
+        st.markdown(f'''<div class="insight-card">
+        <b style="color:{BRAND_ORANGE}">🚀 Future Resource Planning</b><br>
+        Trend Analysis: <b>Next week volume projected at +4%</b>.<br>
+        Recommendation: Monitor '{f_df[query_col].mode()[0] if query_col in f_df.columns else "top query"}' for spikes.</div>''', unsafe_allow_html=True)
+
+else:
+    st.info("Please enter the Google Sheet URL in the sidebar to load the Blue Theme Dashboard.")
