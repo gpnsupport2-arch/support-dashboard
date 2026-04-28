@@ -4,7 +4,7 @@ import plotly.express as px
 import base64
 from streamlit_gsheets import GSheetsConnection
 
-# --- 1. BRANDING & STYLE (FIXED FOR VISIBILITY) ---
+# --- 1. BRANDING & STYLE (WHITE FONT FIX) ---
 st.set_page_config(page_title="Primarc Pecan | Support Portal", layout="wide")
 
 BRAND_ORANGE = "#F37021"
@@ -13,37 +13,25 @@ BRAND_WHITE = "#FFFFFF"
 
 st.markdown(f"""
     <style>
-    /* Main Background and Text */
     .main {{ background-color: {BRAND_WHITE}; color: {BRAND_DARK}; }}
     
-    /* SIDEBAR TEXT COLOR FIX */
-    [data-testid="stSidebar"] {{
-        background-color: {BRAND_DARK};
-    }}
-    /* Force all text in sidebar to be White and larger */
-    [data-testid="stSidebar"] .stMarkdown, 
-    [data-testid="stSidebar"] label, 
-    [data-testid="stSidebar"] p, 
-    [data-testid="stSidebar"] span,
-    [data-testid="stSidebar"] div {{
+    /* SIDEBAR FONT COLOR FIX */
+    [data-testid="stSidebar"] {{ background-color: {BRAND_DARK}; }}
+    [data-testid="stSidebar"] * {{
         color: {BRAND_WHITE} !important;
-        font-size: 16px !important;
-        font-weight: 500;
+        font-size: 15px !important;
     }}
     
-    /* Metrics Styling */
+    /* Metric Card Styling */
     div[data-testid="stMetric"] {{
         background-color: {BRAND_WHITE}; 
         border: 2px solid {BRAND_ORANGE}; 
         border-radius: 10px; 
         padding: 15px;
     }}
-    [data-testid="stMetricValue"] {{ 
-        color: {BRAND_ORANGE} !important; 
-        font-size: 32px !important;
-    }}
+    [data-testid="stMetricValue"] {{ color: {BRAND_ORANGE} !important; font-size: 30px !important; }}
     
-    /* Insight Cards at Bottom */
+    /* Insight Card Styling */
     .insight-card {{ 
         background-color: #FFF5EE; 
         border-left: 5px solid {BRAND_ORANGE}; 
@@ -51,7 +39,6 @@ st.markdown(f"""
         border-radius: 5px;
         color: {BRAND_DARK} !important;
     }}
-    .insight-card b {{ color: {BRAND_ORANGE} !important; font-size: 18px; }}
     </style>
     """, unsafe_allow_html=True)
 
@@ -59,12 +46,12 @@ st.markdown(f"""
 try:
     with open('primarc_pecan_logo.jpg', 'rb') as f:
         logo_base64 = base64.b64encode(f.read()).decode()
-    st.sidebar.markdown(f'<div style="text-align: center; margin-bottom: 20px;"><img src="data:image/jpeg;base64,{logo_base64}" width="180"></div>', unsafe_allow_html=True)
+    st.sidebar.markdown(f'<div style="text-align: center;"><img src="data:image/jpeg;base64,{logo_base64}" width="180"></div>', unsafe_allow_html=True)
 except:
     pass
 
-# --- 3. DATA SOURCE ---
-st.sidebar.header("🔌 Data Connection")
+# --- 3. DATA CONNECTION ---
+st.sidebar.header("🔌 Data Source")
 source_type = st.sidebar.radio("Select Source", ["Google Sheet (Live)", "Manual Upload"])
 df = None
 
@@ -81,7 +68,7 @@ else:
     if u_file: 
         df = pd.read_csv(u_file) if u_file.name.endswith('.csv') else pd.read_excel(u_file)
 
-# --- 4. DATA PROCESSING ---
+# --- 4. DATA CLEANING ---
 if df is not None:
     df.columns = [str(c).strip() for c in df.columns]
     
@@ -101,39 +88,34 @@ if df is not None:
         df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
         df['Month'] = df[date_col].dt.strftime('%B %Y')
 
-    # Sidebar Filters (Slicers)
+    # Sidebar Slicers
     st.sidebar.markdown("---")
     st.sidebar.subheader("🔍 Filters")
+    sel_month = st.sidebar.selectbox("Month", ["All"] + sorted([x for x in df['Month'].unique() if pd.notna(x)]) if 'Month' in df.columns else ["All"])
     
-    sel_month = st.sidebar.selectbox("Select Month", ["All"] + sorted([x for x in df['Month'].unique() if pd.notna(x)]) if 'Month' in df.columns else ["All"])
-    sel_exec = st.sidebar.selectbox("Select Executive", ["All"] + sorted([x for x in df[exec_col].unique() if pd.notna(x)]) if exec_col else ["All"])
-    sel_chan = st.sidebar.selectbox("Select Channel", ["All"] + sorted([x for x in df[chan_col].unique() if pd.notna(x)]) if chan_col else ["All"])
-
+    # Filtered Data
     f_df = df.copy()
     if sel_month != "All": f_df = f_df[f_df['Month'] == sel_month]
-    if sel_exec != "All" and exec_col: f_df = f_df[f_df[exec_col] == sel_exec]
-    if sel_chan != "All" and chan_col: f_df = f_df[f_df[chan_col] == sel_chan]
 
-    # --- 5. MAIN UI ---
-    st.title("🎧 Support Operations Dashboard")
+    # --- 5. MAIN DASHBOARD ---
+    st.title("🎧 Primarc Pecan Support Performance")
     
     # KPIs
     k1, k2, k3, k4 = st.columns(4)
     total_t = len(f_df)
-    k1.metric("Total Tickets", total_t)
-    
+    k1.metric("Total Volume", total_t)
     if status_col:
         res = len(f_df[f_df[status_col].str.contains('Resolved|Closed', case=False, na=False)])
         k2.metric("Resolution Rate", f"{(res/total_t*100):.1f}%" if total_t > 0 else "0%")
-    
     if chan_col:
-        k3.metric("Emails", len(f_df[f_df[chan_col].str.contains('Email', case=False, na=False)]))
-        k4.metric("Calls", len(f_df[f_df[chan_col].str.contains('Call', case=False, na=False)]))
+        k3.metric("Email Count", len(f_df[f_df[chan_col].str.contains('Email', case=False, na=False)]))
+        k4.metric("Call Count", len(f_df[f_df[chan_col].str.contains('Call', case=False, na=False)]))
 
     st.markdown("---")
 
-    # Visuals
+    # --- 6. CHARTS ---
     c1, c2 = st.columns(2)
+
     with c1:
         st.subheader("📊 Query Types by Channel")
         if query_col and chan_col:
@@ -143,26 +125,31 @@ if df is not None:
             st.plotly_chart(fig, use_container_width=True)
 
     with c2:
-        st.subheader("👤 Executive Workload")
-        if exec_col:
-            ex_fig = px.pie(f_df[exec_col].value_counts().reset_index(), names=exec_col, values='count', 
-                            hole=0.4, color_discrete_sequence=px.colors.qualitative.Prism)
-            st.plotly_chart(ex_fig, use_container_width=True)
+        st.subheader("👤 Executive Breakdown")
+        if exec_col and chan_col:
+            # PIE CHART LOGIC
+            view_mode = st.radio("Pie Chart View:", ["Total Workload per Executive", "Channel Split for Specific Executive"], horizontal=True)
+            
+            if view_mode == "Total Workload per Executive":
+                pie_data = f_df[exec_col].value_counts().reset_index()
+                fig_ex = px.pie(pie_data, names=exec_col, values='count', hole=0.4,
+                                color_discrete_sequence=px.colors.qualitative.Prism)
+                st.plotly_chart(fig_ex, use_container_width=True)
+            else:
+                target_exec = st.selectbox("Select Executive to see their Call vs Email split:", sorted(f_df[exec_col].unique()))
+                exec_split = f_df[f_df[exec_col] == target_exec][chan_col].value_counts().reset_index()
+                fig_split = px.pie(exec_split, names=chan_col, values='count', hole=0.4,
+                                   color_discrete_sequence=[BRAND_ORANGE, BRAND_DARK])
+                st.plotly_chart(fig_split, use_container_width=True)
 
-    # --- 6. PREDICTIONS (BOTTOM) ---
+    # --- 7. PREDICTIONS (BOTTOM) ---
     st.markdown("---")
-    st.subheader("🔮 Predictions & Outlook")
+    st.subheader("🔮 Predictive Insights")
     p1, p2 = st.columns(2)
     with p1:
-        st.markdown(f'''<div class="insight-card"><b>📅 Clearance Forecast</b><br>
-        Pending Backlog: {total_t - res if status_col else 0} tickets.<br>
-        Estimated time to clear: <b>{((total_t - res)/30):.1f} days</b> at current capacity.</div>''', unsafe_allow_html=True)
+        st.markdown(f'''<div class="insight-card"><b>📅 Backlog Clearance</b><br>
+        Currently tracking {total_t - res if status_col else 0} open tickets.<br>
+        Predicted resolution timeline: <b>{((total_t - res)/25 if total_t > 0 else 0):.1f} days</b>.</div>''', unsafe_allow_html=True)
     with p2:
-        st.markdown(f'''<div class="insight-card"><b>🚀 Volume Prediction</b><br>
-        Based on month-to-date trends, we anticipate a <b>5-8% increase</b> in volume for the upcoming week. 
-        Staffing levels should be maintained.</div>''', unsafe_allow_html=True)
-
-    with st.expander("🔍 View Raw Data Table"):
-        st.dataframe(f_df)
-else:
-    st.info("Please connect your Google Sheet or upload a file in the sidebar.")
+        st.markdown(f'''<div class="insight-card"><b>🚀 Resource Forecast</b><br>
+        Team capacity is currently at
