@@ -101,6 +101,9 @@ if df_s is not None:
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import streamlit as st
+import pandas as pd
+import plotly.express as px
 
 # --- AUDIT TRACKER MODULE ---
 def show_audit_tracker(df):
@@ -138,6 +141,43 @@ def show_audit_tracker(df):
         avg_score = df['numeric_score'].mean()
         m3.metric("Avg Quality Score", f"{avg_score:.2f}" if not pd.isna(avg_score) else "N/A")
 
+        # 4. Executive Performance Table
+        st.markdown("### Agent-wise Audit Summary")
+        summary = df.groupby(agent_col).agg(
+            calls_taken=(ticket_col, 'count'),
+            csat_collected=('Sentiment', lambda x: (x != "No Rating").sum()),
+            positives=('Sentiment', lambda x: (x == "Positive").sum()),
+            negatives=('Sentiment', lambda x: (x == "Negative").sum())
+        ).reset_index()
+
+        # Calculate agent-specific collection percentage
+        summary['Collection %'] = (summary['csat_collected'] / summary['calls_taken'] * 100).round(1)
+        
+        # Rename columns for the final display
+        summary.columns = ['Executive Name', 'Calls Taken', 'CSAT Collected', 'Positive (4-5)', 'Negative (1-3)', 'Collection %']
+        
+        st.dataframe(summary.sort_values(by='Calls Taken', ascending=False), use_container_width=True)
+
+        # 5. Visual Breakdown
+        c1, c2 = st.columns(2)
+        with c1:
+            st.subheader("Sentiment Distribution")
+            sent_counts = valid_csats['Sentiment'].value_counts().reset_index()
+            fig_pie = px.pie(sent_counts, names='index', values='Sentiment', hole=0.4,
+                             color_discrete_map={'Positive': '#22C55E', 'Negative': '#EF4444'})
+            st.plotly_chart(fig_pie, use_container_width=True)
+            
+        with c2:
+            st.subheader("Collection Rate by Agent")
+            fig_bar = px.bar(summary, x='Executive Name', y='Collection %', 
+                             color_discrete_sequence=['#F37021'])
+            st.plotly_chart(fig_bar, use_container_width=True)
+    else:
+        st.error("Audit columns ('Agent' or 'Csat') not found in the file.")
+
+# Usage Example (if df is your uploaded dataframe):
+# show_audit_tracker(df)
+        
         # 4. Executive Performance Table
         st.markdown("### Agent-wise Audit Summary")
         summary = df.groupby(agent_col).agg(
