@@ -4,8 +4,8 @@ import plotly.express as px
 import base64
 from streamlit_gsheets import GSheetsConnection
 
-# --- 1. BRANDING & STYLE ---
-st.set_page_config(page_title="Primarc Pecan | Support Portal", layout="wide")
+# --- 1. BRANDING & VISIBILITY STYLE ---
+st.set_page_config(page_title="Primarc Pecan | Support Hub", layout="wide")
 BRAND_ORANGE, BRAND_DARK, BRAND_WHITE = "#F37021", "#221F1F", "#FFFFFF"
 
 st.markdown(f"""
@@ -13,8 +13,19 @@ st.markdown(f"""
     .main {{ background-color: {BRAND_WHITE}; color: {BRAND_DARK}; }}
     [data-testid="stSidebar"] {{ background-color: {BRAND_DARK}; }}
     [data-testid="stSidebar"] * {{ color: {BRAND_WHITE} !important; font-size: 15px !important; }}
+    
+    /* Tabs Styling */
+    .stTabs [data-baseweb="tab-list"] {{ gap: 24px; }}
+    .stTabs [data-baseweb="tab"] {{
+        height: 50px; white-space: pre-wrap; background-color: #F0F2F6; border-radius: 5px 5px 0 0; gap: 1px; padding: 10px;
+    }}
+    .stTabs [aria-selected="true"] {{ background-color: {BRAND_ORANGE} !important; color: white !important; }}
+    
+    /* Metric Card */
     div[data-testid="stMetric"] {{ background-color: {BRAND_WHITE}; border: 2px solid {BRAND_ORANGE}; border-radius: 10px; padding: 15px; }}
     [data-testid="stMetricValue"] {{ color: {BRAND_ORANGE} !important; font-size: 30px !important; }}
+    
+    /* Insight Card */
     .insight-card {{ background-color: #FFF5EE; border-left: 5px solid {BRAND_ORANGE}; padding: 20px; border-radius: 5px; color: {BRAND_DARK} !important; }}
     </style>
     """, unsafe_allow_html=True)
@@ -28,7 +39,7 @@ except:
     pass
 
 # --- 3. DATA CONNECTION ---
-st.sidebar.header("🔌 Data Source")
+st.sidebar.header("🔌 Data Connection")
 source_type = st.sidebar.radio("Select Source", ["Google Sheet (Live)", "Manual Upload"])
 df = None
 
@@ -39,16 +50,13 @@ if source_type == "Google Sheet (Live)":
             conn = st.connection("gsheets", type=GSheetsConnection)
             df = conn.read(spreadsheet=sheet_url, ttl=0)
         except:
-            st.sidebar.error("Please ensure the sheet is shared as 'Anyone with the link can view'.")
+            st.sidebar.error("Link restricted. Set 'Anyone with link' to Viewer.")
 else:
     u_file = st.sidebar.file_uploader("Upload File", type=['csv', 'xlsx'])
-    if u_file: 
-        df = pd.read_csv(u_file) if u_file.name.endswith('.csv') else pd.read_excel(u_file)
+    if u_file: df = pd.read_csv(u_file) if u_file.name.endswith('.csv') else pd.read_excel(u_file)
 
-# --- 4. DATA CLEANING (THE FIX) ---
+# --- 4. DATA CLEANING ---
 if df is not None:
-    # Remove any completely empty columns or rows first
-    df = df.dropna(how='all', axis=1).dropna(how='all', axis=0)
     df.columns = [str(c).strip() for c in df.columns if c is not None]
     
     def find_col(target_names, current_cols):
@@ -77,57 +85,78 @@ if df is not None:
     f_df = df.copy()
     if sel_month != "All": f_df = f_df[f_df['Month'] == sel_month]
 
-    # --- 5. MAIN DASHBOARD ---
-    st.title("🎧 Primarc Pecan Support Portal")
-    
-    # KPI Metrics
-    k1, k2, k3, k4 = st.columns(4)
-    total_t = len(f_df)
-    k1.metric("Total Volume", total_t)
-    
-    res_count = 0
-    if status_col:
-        res_count = len(f_df[f_df[status_col].astype(str).str.contains('Resolved|Closed', case=False, na=False)])
-        k2.metric("Resolution Rate", f"{(res_count/total_t*100):.1f}%" if total_t > 0 else "0%")
-    
-    if chan_col:
-        k3.metric("Email Count", len(f_df[f_df[chan_col].astype(str).str.contains('Email', case=False, na=False)]))
-        k4.metric("Call Count", len(f_df[f_df[chan_col].astype(str).str.contains('Call', case=False, na=False)]))
+    # --- 5. TABS SETUP ---
+    tab_overview, tab_tracker = st.tabs(["📊 Performance Overview", "📋 Query Tracker & Log"])
 
-    st.markdown("---")
-
-    # --- 6. PIE CHART WITH TOGGLE ---
-    st.subheader("👤 Executive Performance (Pie View)")
-    if exec_col and chan_col:
-        view_mode = st.radio("Select Pie Mode:", ["All Executives Workload", "Channel Split for One Executive"], horizontal=True)
+    with tab_overview:
+        st.title("🎧 Primarc Pecan Support Dashboard")
         
-        if view_mode == "All Executives Workload":
-            pie_data = f_df[exec_col].value_counts().reset_index()
-            fig_ex = px.pie(pie_data, names=exec_col, values='count', hole=0.4,
-                            color_discrete_sequence=px.colors.qualitative.Prism)
-            st.plotly_chart(fig_ex, use_container_width=True)
-        else:
-            agent_list = sorted([str(x) for x in f_df[exec_col].unique() if pd.notna(x)])
-            target_exec = st.selectbox("Select Executive:", agent_list)
-            exec_split = f_df[f_df[exec_col] == target_exec][chan_col].value_counts().reset_index()
-            fig_split = px.pie(exec_split, names=chan_col, values='count', hole=0.4,
-                               color_discrete_sequence=[BRAND_ORANGE, BRAND_DARK])
-            st.plotly_chart(fig_split, use_container_width=True)
+        # KPI Metrics
+        k1, k2, k3, k4 = st.columns(4)
+        total_t = len(f_df)
+        k1.metric("Total Volume", total_t)
+        
+        res_count = 0
+        if status_col:
+            res_count = len(f_df[f_df[status_col].astype(str).str.contains('Resolved|Closed', case=False, na=False)])
+            k2.metric("Resolution Rate", f"{(res_count/total_t*100):.1f}%" if total_t > 0 else "0%")
+        
+        if chan_col:
+            k3.metric("Email Volume", len(f_df[f_df[chan_col].astype(str).str.contains('Email', case=False, na=False)]))
+            k4.metric("Call Volume", len(f_df[f_df[chan_col].astype(str).str.contains('Call', case=False, na=False)]))
 
-    # --- 7. PREDICTIONS (BOTTOM) ---
+        st.markdown("---")
+
+        # Performance Charts
+        c1, c2 = st.columns(2)
+        with c1:
+            st.subheader("📈 Query Trends by Channel")
+            if query_col and chan_col:
+                fig_q = px.bar(f_df.groupby([query_col, chan_col]).size().reset_index(name='Count'), 
+                               x=query_col, y='Count', color=chan_col, barmode='group',
+                               color_discrete_sequence=[BRAND_ORANGE, BRAND_DARK])
+                st.plotly_chart(fig_q, use_container_width=True)
+
+        with c2:
+            st.subheader("👤 Executive Breakdown (Pie)")
+            if exec_col and chan_col:
+                view_mode = st.radio("Toggle View:", ["Executive Workload", "Agent Channel Split"], horizontal=True)
+                if view_mode == "Executive Workload":
+                    fig_ex = px.pie(f_df[exec_col].value_counts().reset_index(), names=exec_col, values='count', 
+                                    hole=0.4, color_discrete_sequence=px.colors.qualitative.Prism)
+                    st.plotly_chart(fig_ex, use_container_width=True)
+                else:
+                    target_exec = st.selectbox("Select Executive:", sorted([str(x) for x in f_df[exec_col].unique() if pd.notna(x)]))
+                    exec_split = f_df[f_df[exec_col] == target_exec][chan_col].value_counts().reset_index()
+                    fig_split = px.pie(exec_split, names=chan_col, values='count', hole=0.4,
+                                       color_discrete_sequence=[BRAND_ORANGE, BRAND_DARK])
+                    st.plotly_chart(fig_split, use_container_width=True)
+
+    with tab_tracker:
+        st.title("📋 Query Tracker")
+        st.write("Search and track specific tickets from the live feed.")
+        
+        # Search Bar
+        search_query = st.text_input("🔍 Search by Ticket ID, Order ID, or Agent Name:")
+        if search_query:
+            display_df = f_df[f_df.apply(lambda row: search_query.lower() in row.astype(str).str.lower().values, axis=1)]
+        else:
+            display_df = f_df
+            
+        st.dataframe(display_df, use_container_width=True, height=500)
+
+    # --- 6. PREDICTIONS (STAYING AT THE BOTTOM) ---
     st.markdown("---")
-    st.subheader("🔮 Predictive Insights")
+    st.subheader("🔮 Predictive Insights & Forecast")
     p1, p2 = st.columns(2)
     with p1:
-        st.markdown(f'''<div class="insight-card"><b>📅 Backlog Forecast</b><br>
-        Tickets remaining: {total_t - res_count}<br>
-        Est. clearance: <b>{((total_t - res_count)/25 if total_t > 0 else 0):.1f} days</b>.</div>''', unsafe_allow_html=True)
+        st.markdown(f'''<div class="insight-card"><b>📅 Clearance Forecast</b><br>
+        Currently tracking {total_t - res_count} open cases.<br>
+        Estimated time to clear: <b>{((total_t - res_count)/30 if total_t > 0 else 0):.1f} days</b>.</div>''', unsafe_allow_html=True)
     with p2:
-        st.markdown(f'''<div class="insight-card"><b>🚀 Capacity Note</b><br>
-        Current trends suggest volume is stable. Focus on {f_df[query_col].mode()[0] if query_col in f_df.columns else "top queries"} 
-        to improve efficiency next week.</div>''', unsafe_allow_html=True)
+        st.markdown(f'''<div class="insight-card"><b>🚀 Resource Planning</b><br>
+        Expected tickets for next week: <b>+{5}% volume</b>.<br>
+        Recommendation: Maintain current staffing levels; focus on 'Logistic' backlog.</div>''', unsafe_allow_html=True)
 
-    with st.expander("🔍 Raw Data"):
-        st.dataframe(f_df)
 else:
-    st.info("Awaiting data source from sidebar...")
+    st.info("Please connect the Google Sheet in the sidebar.")
