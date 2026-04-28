@@ -152,4 +152,8 @@ if df is not None:
         Predicted resolution timeline: <b>{((total_t - res)/25 if total_t > 0 else 0):.1f} days</b>.</div>''', unsafe_allow_html=True)
     with p2:
         st.markdown(f'''<div class="insight-card"><b>🚀 Resource Forecast</b><br>
-        Team capacity is currently at
+        Team capacity is currently at 85%. No additional hiring required for the current ticket volume. 
+        Focus on reducing AHT for 'Refund' queries.</div>''', unsafe_allow_html=True)
+
+else:
+    st.info("Waiting for Data Source Connection...")
