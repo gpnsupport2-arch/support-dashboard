@@ -4,7 +4,7 @@ import plotly.express as px
 import base64
 from streamlit_gsheets import GSheetsConnection
 
-# --- 1. BRANDING & THEME ---
+# --- 1. BRANDING & PERSISTENT THEME ---
 st.set_page_config(page_title="Primarc Pecan | Performance Hub", layout="wide")
 BRAND_ORANGE, BRAND_NAVY, BRAND_WHITE = "#F37021", "#101828", "#FFFFFF"
 
@@ -13,10 +13,10 @@ st.markdown(f"""
     .stApp {{ background: linear-gradient(180deg, {BRAND_NAVY} 0%, #1D2939 100%); }}
     h1, h2, h3, p, span, label, .stMarkdown {{ color: {BRAND_WHITE} !important; }}
     
-    /* Center Logo */
-    .logo-container {{ display: flex; justify-content: center; padding: 10px; margin-bottom: 10px; }}
+    /* Logo Center */
+    .logo-container {{ display: flex; justify-content: center; padding: 10px; }}
 
-    /* Dropdown Visibility Fix */
+    /* Dropdown Selection Fix (Dark text on white background) */
     div[data-baseweb="select"] > div {{ background-color: white !important; color: {BRAND_NAVY} !important; }}
     div[role="listbox"] div {{ color: {BRAND_NAVY} !important; }}
     
@@ -35,7 +35,7 @@ st.markdown(f"""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. LOGO ---
+# --- 2. LOGO (TOP CENTER) ---
 try:
     with open('primarc_pecan_logo.jpg', 'rb') as f:
         logo_data = base64.b64encode(f.read()).decode()
@@ -43,7 +43,7 @@ try:
 except:
     st.markdown("<h1 style='text-align: center; color: #F37021;'>PRIMARC PECAN</h1>", unsafe_allow_html=True)
 
-# --- 3. DATA LOADER (FIXED FOR MULTIPLE EXCEL) ---
+# --- 3. DATA LOADER ---
 st.sidebar.header("🔌 Data Sources")
 
 def load_data_source(label, key_id):
@@ -68,8 +68,7 @@ df_a = load_data_source("Audit Tracker", "audit")
 def clean_df(df):
     if df is not None:
         df.columns = [str(c).strip() for c in df.columns]
-        # Remove empty rows/cols
-        df = df.dropna(how='all', axis=0).dropna(how='all', axis=1)
+        df = df.dropna(how='all', axis=0)
     return df
 
 df_s, df_a = clean_df(df_s), clean_df(df_a)
@@ -108,7 +107,7 @@ st.markdown("---")
 # --- 5. TABS ---
 t1, t2 = st.tabs(["📊 Performance Overview", "🕵️ CSAT & Audit Tracker"])
 
-# TAB 1: SUPPORT ANALYTICS
+# TAB 1: PERFORMANCE (PIE CHARTS)
 with t1:
     if df_s is not None:
         e_col = find_col(['executive', 'agent', 'email'], df_s)
@@ -121,66 +120,58 @@ with t1:
                 fig1.update_layout(paper_bgcolor='rgba(0,0,0,0)', font=dict(color="white"))
                 st.plotly_chart(fig1, use_container_width=True)
             with c2:
-                st.subheader("Executive Deep-Dive")
-                agent = st.selectbox("Select Executive Name:", sorted(df_s[e_col].dropna().unique()))
+                st.subheader("Executive Channel Split")
+                agent = st.selectbox("Select Executive Name:", sorted(df_s[e_col].dropna().unique()), key="exec_select")
                 sub = df_s[df_s[e_col] == agent]
                 fig2 = px.pie(sub, names=c_col, hole=0.4, color_discrete_sequence=[BRAND_ORANGE, "#475467"])
                 fig2.update_layout(paper_bgcolor='rgba(0,0,0,0)', font=dict(color="white"))
                 st.plotly_chart(fig2, use_container_width=True)
-    else:
-        st.info("Upload Support Tracker to see Performance Analytics.")
 
-# TAB 2: AUDIT TRACKER (CSAT LOGIC)
+# TAB 2: AUDIT TRACKER (CSAT COLLECTION)
 with t2:
-    st.subheader("🕵️ Quality & CSAT Collection")
+    st.subheader("🕵️ Quality Audit & Ratings")
     if df_a is not None:
+        # Search for columns
         ae_col = find_col(['executive', 'agent', 'name'], df_a)
         as_col = find_col(['score', 'rating', 'csat'], df_a)
 
         if ae_col and as_col:
-            # Clean numeric data
-            df_a[as_col] = pd.to_numeric(df_a[as_col], errors='coerce')
+            # Ensure scores are numbers
+            df_a[as_col] = pd.to_numeric(df_a[as_col], errors='coerce').fillna(0)
             
-            # POSITIVE / NEGATIVE Logic
-            # 4-5 = Positive | Below 3 = Negative
-            def categorize(val):
-                if val >= 4: return "Positive ✅"
-                elif val <= 3: return "Negative ❌"
-                return "Neutral ⚠️"
+            # Logic: 4-5 is Positive, 3 and below is Negative
+            df_a['Sentiment'] = df_a[as_col].apply(lambda x: "Positive ✅" if x >= 4 else ("Negative ❌" if x <= 3 else "Neutral ⚠️"))
             
-            df_a['Sentiment'] = df_a[as_col].apply(categorize)
-            
-            # Scorecard Metrics
+            # Summary Metrics
             m1, m2, m3 = st.columns(3)
             m1.metric("Total CSAT Collected", len(df_a))
             m2.metric("Avg Quality Score", f"{df_a[as_col].mean():.2f}")
-            pos_rate = (len(df_a[df_a[as_col] >= 4]) / len(df_a) * 100) if len(df_a) > 0 else 0
-            m3.metric("Positive CSAT %", f"{pos_rate:.1f}%")
+            pos_count = len(df_a[df_a[as_col] >= 4])
+            pos_perc = (pos_count / len(df_a) * 100) if len(df_a) > 0 else 0
+            m3.metric("Positive CSAT %", f"{pos_perc:.1f}%")
 
-            st.markdown("### Executive-wise CSAT Performance")
-            # Grouping for the summary table you requested
-            summary = df_a.groupby(ae_col).agg({
-                as_col: ['count', 'mean'],
-                'Sentiment': [lambda x: (x == "Positive ✅").sum(), lambda x: (x == "Negative ❌").sum()]
-            }).reset_index()
+            st.markdown("### Executive-wise Summary")
+            # Create the requested summary table
+            sum_table = df_a.groupby(ae_col).agg(
+                csat_collection=(as_col, 'count'),
+                avg_score=(as_col, 'mean'),
+                positives=('Sentiment', lambda x: (x == "Positive ✅").sum()),
+                negatives=('Sentiment', lambda x: (x == "Negative ❌").sum())
+            ).reset_index()
             
-            summary.columns = ['Executive Name', 'CSAT Collection', 'Avg Quality Score', 'Positive Count', 'Negative Count']
-            
-            # Final Table View
-            st.dataframe(summary.style.background_gradient(subset=['Avg Quality Score'], cmap='RdYlGn'), use_container_width=True)
-            
-            st.markdown("### Raw Audit Log")
-            st.dataframe(df_a[[ae_col, as_col, 'Sentiment']], use_container_width=True)
+            # Rename for display
+            sum_table.columns = ['Executive Name', 'CSAT Collection', 'Quality Score', 'Positive Ratings', 'Negative Ratings']
+            st.dataframe(sum_table, use_container_width=True)
         else:
-            st.error("Audit sheet must contain 'Executive' and 'Score' columns.")
+            st.error("Could not find 'Executive' and 'Score' columns in the Audit file.")
     else:
-        st.info("Upload Audit Tracker to see CSAT Metrics.")
+        st.info("Upload Audit Tracker in the sidebar to see CSAT metrics.")
 
 # --- 6. PREDICTIONS ---
 st.markdown("---")
 st.subheader("🔮 Predictive Insights")
 p1, p2 = st.columns(2)
 with p1:
-    st.markdown('<div class="insight-card"><b>📅 Backlog Forecast</b><br>Remaining Volume calculated based on Support Data.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="insight-card"><b>📅 Backlog Forecast</b><br>Data analyzed based on ticket status and history.</div>', unsafe_allow_html=True)
 with p2:
-    st.markdown('<div class="insight-card"><b>🚀 Capacity Planning</b><br>Executive CSAT scores 4-5 are trending positively.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="insight-card"><b>🚀 Capacity Planning</b><br>Quality scores 4-5 show stable performance.</div>', unsafe_allow_html=True)
