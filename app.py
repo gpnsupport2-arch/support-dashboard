@@ -1,171 +1,178 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import base64
+import logging
+from datetime import datetime
+from typing import Optional, List, Tuple, Dict, Any
 from streamlit_gsheets import GSheetsConnection
 
-# --- 1. BRANDING & PERSISTENT STYLE ---
-st.set_page_config(page_title="Primarc Pecan | Operations Portal", layout="wide")
-BRAND_ORANGE, BRAND_NAVY, BRAND_WHITE = "#F37021", "#101828", "#FFFFFF"
+# ============================================================================
+# CONFIGURATION & LOGGING
+# ============================================================================
 
-st.markdown(f"""
-    <style>
-    .stApp {{ background: linear-gradient(180deg, {BRAND_NAVY} 0%, #1D2939 100%); }}
-    h1, h2, h3, p, span, label, .stMarkdown {{ color: {BRAND_WHITE} !important; }}
+# Configure logging for debugging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Brand Colors - Consistent across app
+BRAND_ORANGE = "#F37021"
+BRAND_NAVY = "#101828"
+BRAND_WHITE = "#FFFFFF"
+BRAND_DARK_GRAY = "#1D2939"
+BRAND_LIGHT_GRAY = "#475467"
+POSITIVE_GREEN = "#22C55E"
+NEGATIVE_RED = "#EF4444"
+
+# Page Configuration
+st.set_page_config(
+    page_title="Primarc Pecan | Operations Portal",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# ============================================================================
+# 1. BRANDING & THEME STYLING
+# ============================================================================
+
+def apply_theme():
+    """Apply consistent branding and styling across the application."""
+    st.markdown(f"""
+        <style>
+        /* Main App Background */
+        .stApp {{ 
+            background: linear-gradient(180deg, {BRAND_NAVY} 0%, {BRAND_DARK_GRAY} 100%); 
+        }}
+        
+        /* Text Elements */
+        h1, h2, h3, h4, h5, h6, p, span, label, .stMarkdown {{ 
+            color: {BRAND_WHITE} !important; 
+        }}
+        
+        /* Logo Container */
+        .logo-container {{ 
+            display: flex; 
+            justify-content: center; 
+            padding: 20px; 
+            background-color: rgba(255, 255, 255, 0.05); 
+            border-radius: 0 0 20px 20px; 
+            margin-bottom: 20px; 
+        }}
+        
+        /* Dropdown/Select Elements */
+        div[data-baseweb="select"] > div {{ 
+            background-color: white !important; 
+            color: {BRAND_NAVY} !important; 
+            border-radius: 5px;
+        }}
+        div[role="listbox"] div {{ 
+            color: {BRAND_NAVY} !important; 
+        }}
+        
+        /* Metric Cards */
+        div[data-testid="stMetric"] {{ 
+            background-color: {BRAND_DARK_GRAY}; 
+            border: 2px solid {BRAND_ORANGE}; 
+            border-radius: 10px; 
+            padding: 20px;
+        }}
+        [data-testid="stMetricValue"] {{ 
+            color: {BRAND_ORANGE} !important; 
+            font-size: 32px !important; 
+        }}
+        [data-testid="stMetricLabel"] {{ 
+            color: {BRAND_WHITE} !important; 
+        }}
+        
+        /* Sidebar */
+        [data-testid="stSidebar"] {{ 
+            background-color: {BRAND_NAVY} !important; 
+            border-right: 2px solid {BRAND_ORANGE}; 
+        }}
+        
+        /* Tabs */
+        .stTabs [aria-selected="true"] {{ 
+            background-color: {BRAND_ORANGE} !important; 
+            border-radius: 5px; 
+        }}
+        
+        /* Insight Cards */
+        .insight-card {{ 
+            background-color: rgba(255, 255, 255, 0.08); 
+            border-left: 5px solid {BRAND_ORANGE}; 
+            padding: 20px; 
+            border-radius: 8px;
+            margin: 10px 0;
+        }}
+        
+        /* Dataframe styling */
+        .stDataFrame, .stDataframe {{
+            background-color: {BRAND_DARK_GRAY} !important;
+        }}
+        </style>
+        """, unsafe_allow_html=True)
+
+# ============================================================================
+# 2. LOGO PLACEMENT
+# ============================================================================
+
+def display_logo():
+    """Display company logo at the top of the page with fallback."""
+    try:
+        with open('primarc_pecan_logo.jpg', 'rb') as f:
+            logo_data = base64.b64encode(f.read()).decode()
+        st.markdown(
+            f'<div class="logo-container"><img src="data:image/jpeg;base64,{logo_data}" width="250"></div>', 
+            unsafe_allow_html=True
+        )
+    except FileNotFoundError:
+        logger.warning("Logo file not found. Using fallback text.")
+        st.markdown(
+            f"<h1 style='text-align: center; color: {BRAND_ORANGE};'>PRIMARC PECAN</h1>",
+            unsafe_allow_html=True
+        )
+    except Exception as e:
+        logger.error(f"Error loading logo: {e}")
+        st.markdown(
+            f"<h1 style='text-align: center; color: {BRAND_ORANGE};'>PRIMARC PECAN</h1>",
+            unsafe_allow_html=True
+        )
+
+# ============================================================================
+# 3. UTILITY FUNCTIONS - TIME & DATA CONVERSION
+# ============================================================================
+
+def aht_to_minutes(time_str: str) -> float:
+    """
+    Convert Average Handle Time string to minutes.
     
-    /* Center the logo at the top */
-    .logo-container {{
-        display: flex;
-        justify-content: center;
-        padding: 20px;
-        background-color: rgba(255, 255, 255, 0.05);
-        border-radius: 0 0 20px 20px;
-        margin-bottom: 20px;
-    }}
-
-    /* Dropdown Selection Fix */
-    div[data-baseweb="select"] > div {{ background-color: white !important; color: {BRAND_NAVY} !important; }}
-    div[role="listbox"] div {{ color: {BRAND_NAVY} !important; }}
+    Handles formats: HH:MM:SS, MM:SS, or numeric values
     
-    /* Metric Cards */
-    div[data-testid="stMetric"] {{ 
-        background-color: #1D2939; 
-        border: 1px solid {BRAND_ORANGE}; 
-        border-radius: 10px; 
-        padding: 15px;
-    }}
-    [data-testid="stMetricValue"] {{ color: {BRAND_ORANGE} !important; font-size: 32px !important; }}
+    Args:
+        time_str: Time string in format HH:MM:SS or MM:SS
+        
+    Returns:
+        float: Total time in minutes
+    """
+    try:
+        if pd.isna(time_str) or str(time_str).strip() == "" or str(time_str) == "0":
+            return 0
+        
+        parts = str(time_str).split(':')
+        
+        if len(parts) == 3:  # HH:MM:SS
+            return int(parts[0]) * 60 + int(parts[1]) + int(parts[2]) / 60
+        elif len(parts) == 2:  # MM:SS
+            return int(parts[0]) + int(parts[1]) / 60
+        else:
+            return float(time_str) if time_str else 0
+    except (ValueError, TypeError):
+        logger.warning(f"Could not convert AHT value: {time_str}")
+        return 0
+
+def find_column(targets: List[str], dataframe: Optional[pd.DataFrame]) -> Optional[str]:
+    """
+    Intelligently find a column in DataFrame by multiple possible names.
     
-    [data-testid="stSidebar"] {{ background-color: {BRAND_NAVY} !important; border-right: 1px solid {BRAND_ORANGE}; }}
-    .stTabs [aria-selected="true"] {{ background-color: {BRAND_ORANGE} !important; border-radius: 5px; }}
-    .insight-card {{ background-color: rgba(255, 255, 255, 0.08); border-left: 5px solid {BRAND_ORANGE}; padding: 20px; border-radius: 8px; }}
-    </style>
-    """, unsafe_allow_html=True)
-
-# --- 2. LOGO PLACEMENT (TOP CENTER) ---
-try:
-    with open('primarc_pecan_logo.jpg', 'rb') as f:
-        logo_data = base64.b64encode(f.read()).decode()
-    st.markdown(
-        f'<div class="logo-container"><img src="data:image/jpeg;base64,{logo_data}" width="250"></div>', 
-        unsafe_allow_html=True
-    )
-except:
-    # Fallback if file is missing
-    st.markdown("<h1 style='text-align: center; color: #F37021;'>PRIMARC PECAN</h1>", unsafe_allow_html=True)
-
-# --- 3. DATA LOADER ---
-st.sidebar.header("🔌 Data Sources")
-
-def load_data_source(label, key_id):
-    st.sidebar.subheader(f"📂 {label}")
-    mode = st.sidebar.radio(f"Input for {label}", ["Google Sheet", "Excel/CSV"], key=f"mode_{key_id}")
-    if mode == "Google Sheet":
-        url = st.sidebar.text_input(f"Paste {label} URL", key=f"url_{key_id}")
-        if url:
-            try:
-                conn = st.connection("gsheets", type=GSheetsConnection)
-                return conn.read(spreadsheet=url, ttl=0)
-            except: return None
-    else:
-        file = st.sidebar.file_uploader(f"Upload {label} File", type=['csv', 'xlsx'], key=f"file_{key_id}")
-        if file:
-            return pd.read_csv(file) if file.name.endswith('.csv') else pd.read_excel(file)
-    return None
-
-df_s = load_data_source("Support Tracker", "support")
-df_a = load_data_source("Audit Tracker", "audit")
-
-# Clean & Find Columns
-def clean_df(df):
-    if df is not None:
-        df.columns = [str(c).strip() for c in df.columns]
-    return df
-
-df_s, df_a = clean_df(df_s), clean_df(df_a)
-
-def find_col(targets, df):
-    if df is None: return None
-    for t in targets:
-        for col in df.columns:
-            if t.lower() in col.lower(): return col
-    return None
-
-# --- 4. KPI SECTION ---
-if df_s is not None:
-    status_col = find_col(['status', 'ticket status'], df_s)
-    chan_col = find_col(['channel'], df_s)
-    
-    k1, k2, k3, k4 = st.columns(4)
-    total_t = len(df_s)
-    
-    k1.metric("Total Tickets", total_t)
-    
-    if status_col:
-        resolved_count = len(df_s[df_s[status_col].astype(str).str.contains('Resolved|Closed|Done', case=False, na=False)])
-        res_rate = (resolved_count / total_t * 100) if total_t > 0 else 0
-        k2.metric("Resolution Rate", f"{res_rate:.1f}%")
-    else:
-        k2.metric("Resolution Rate", "N/A")
-
-    if chan_col:
-        emails = len(df_s[df_s[chan_col].astype(str).str.contains('Email', case=False, na=False)])
-        calls = len(df_s[df_s[chan_col].astype(str).str.contains('Call', case=False, na=False)])
-        k3.metric("Email Volume", emails)
-        k4.metric("Call Volume", calls)
-
-st.markdown("---")
-
-# --- 5. TABS ---
-t1, t2 = st.tabs(["📊 Performance Overview", "🕵️ Audit Tracker"])
-
-# SUPPORT ANALYTICS
-if df_s is not None:
-    e_col = find_col(['executive', 'agent', 'email'], df_s)
-    c_col = find_col(['channel'], df_s)
-
-    with t1:
-        c1, c2 = st.columns(2)
-        with c1:
-            st.subheader("Executive Distribution")
-            fig1 = px.pie(df_s, names=e_col, hole=0.4, color_discrete_sequence=px.colors.sequential.Oranges_r)
-            fig1.update_layout(paper_bgcolor='rgba(0,0,0,0)', font=dict(color="white"))
-            st.plotly_chart(fig1, use_container_width=True)
-        with c2:
-            st.subheader("Agent Deep-Dive")
-            agent_names = sorted(df_s[e_col].dropna().unique())
-            agent = st.selectbox("Select Executive Name:", agent_names, key="sel_agent_tab")
-            sub = df_s[df_s[e_col] == agent]
-            fig2 = px.pie(sub, names=c_col, hole=0.4, color_discrete_sequence=[BRAND_ORANGE, "#475467"])
-            fig2.update_layout(paper_bgcolor='rgba(0,0,0,0)', font=dict(color="white"))
-            st.plotly_chart(fig2, use_container_width=True)
-
-# AUDIT ANALYTICS
-with t2:
-    st.subheader("🕵️ Quality Audit & Ratings")
-    if df_a is not None:
-        ae_col = find_col(['executive', 'agent', 'name'], df_a)
-        as_col = find_col(['score', 'rating'], df_a)
-
-        if ae_col and as_col:
-            df_a[as_col] = pd.to_numeric(df_a[as_col], errors='coerce')
-            df_a['Sentiment'] = df_a[as_col].apply(lambda x: "Positive" if x >= 4 else ("Negative" if x <= 3 else "Neutral"))
-            
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Total Audits", len(df_a))
-            m2.metric("Avg Quality Score", f"{df_a[as_col].mean():.2f}")
-            pos_rate = (len(df_a[df_a['Sentiment']=='Positive']) / len(df_a)) * 100 if len(df_a)>0 else 0
-            m3.metric("Positive Rating %", f"{pos_rate:.1f}%")
-
-            st.dataframe(df_a.groupby(ae_col).agg({as_col: ['count', 'mean']}).reset_index(), use_container_width=True)
-    else:
-        st.info("ℹ️ Connect Audit Source in sidebar.")
-
-# --- 6. PREDICTIONS ---
-st.markdown("---")
-st.subheader("🔮 Predictive Insights")
-p1, p2 = st.columns(2)
-with p1:
-    st.markdown('<div class="insight-card"><b>📅 Backlog Forecast</b><br>Remaining Volume calculated based on Support Data.</div>', unsafe_allow_html=True)
-with p2:
-    st.markdown('<div class="insight-card"><b>🚀 Capacity Planning</b><br>Quality scores 4-5 are trending positively.</div>', unsafe_allow_html=True)
+    Case-insensitive search. Returns first match found.*
