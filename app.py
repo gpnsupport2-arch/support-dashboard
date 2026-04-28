@@ -2,177 +2,114 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import base64
-import logging
-from datetime import datetime
-from typing import Optional, List, Tuple, Dict, Any
-from streamlit_gsheets import GSheetsConnection
+import numpy as np
 
-# ============================================================================
-# CONFIGURATION & LOGGING
-# ============================================================================
+# --- PAGE CONFIG ---
+st.set_page_config(page_title="Support Ops Dashboard", layout="wide", initial_sidebar_state="collapsed")
 
-# Configure logging for debugging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Brand Colors - Consistent across app
-BRAND_ORANGE = "#F37021"
-BRAND_NAVY = "#101828"
-BRAND_WHITE = "#FFFFFF"
-BRAND_DARK_GRAY = "#1D2939"
-BRAND_LIGHT_GRAY = "#475467"
-POSITIVE_GREEN = "#22C55E"
-NEGATIVE_RED = "#EF4444"
-
-# Page Configuration
-st.set_page_config(
-    page_title="Primarc Pecan | Operations Portal",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# ============================================================================
-# 1. BRANDING & THEME STYLING
-# ============================================================================
-
-def apply_theme():
-    """Apply consistent branding and styling across the application."""
-    st.markdown(f"""
-        <style>
-        /* Main App Background */
-        .stApp {{ 
-            background: linear-gradient(180deg, {BRAND_NAVY} 0%, {BRAND_DARK_GRAY} 100%); 
-        }}
-        
-        /* Text Elements */
-        h1, h2, h3, h4, h5, h6, p, span, label, .stMarkdown {{ 
-            color: {BRAND_WHITE} !important; 
-        }}
-        
-        /* Logo Container */
-        .logo-container {{ 
-            display: flex; 
-            justify-content: center; 
-            padding: 20px; 
-            background-color: rgba(255, 255, 255, 0.05); 
-            border-radius: 0 0 20px 20px; 
-            margin-bottom: 20px; 
-        }}
-        
-        /* Dropdown/Select Elements */
-        div[data-baseweb="select"] > div {{ 
-            background-color: white !important; 
-            color: {BRAND_NAVY} !important; 
-            border-radius: 5px;
-        }}
-        div[role="listbox"] div {{ 
-            color: {BRAND_NAVY} !important; 
-        }}
-        
-        /* Metric Cards */
-        div[data-testid="stMetric"] {{ 
-            background-color: {BRAND_DARK_GRAY}; 
-            border: 2px solid {BRAND_ORANGE}; 
-            border-radius: 10px; 
-            padding: 20px;
-        }}
-        [data-testid="stMetricValue"] {{ 
-            color: {BRAND_ORANGE} !important; 
-            font-size: 32px !important; 
-        }}
-        [data-testid="stMetricLabel"] {{ 
-            color: {BRAND_WHITE} !important; 
-        }}
-        
-        /* Sidebar */
-        [data-testid="stSidebar"] {{ 
-            background-color: {BRAND_NAVY} !important; 
-            border-right: 2px solid {BRAND_ORANGE}; 
-        }}
-        
-        /* Tabs */
-        .stTabs [aria-selected="true"] {{ 
-            background-color: {BRAND_ORANGE} !important; 
-            border-radius: 5px; 
-        }}
-        
-        /* Insight Cards */
-        .insight-card {{ 
-            background-color: rgba(255, 255, 255, 0.08); 
-            border-left: 5px solid {BRAND_ORANGE}; 
-            padding: 20px; 
-            border-radius: 8px;
-            margin: 10px 0;
-        }}
-        
-        /* Dataframe styling */
-        .stDataFrame, .stDataframe {{
-            background-color: {BRAND_DARK_GRAY} !important;
-        }}
-        </style>
-        """, unsafe_allow_html=True)
-
-# ============================================================================
-# 2. LOGO PLACEMENT
-# ============================================================================
-
-def display_logo():
-    """Display company logo at the top of the page with fallback."""
-    try:
-        with open('primarc_pecan_logo.jpg', 'rb') as f:
-            logo_data = base64.b64encode(f.read()).decode()
-        st.markdown(
-            f'<div class="logo-container"><img src="data:image/jpeg;base64,{logo_data}" width="250"></div>', 
-            unsafe_allow_html=True
-        )
-    except FileNotFoundError:
-        logger.warning("Logo file not found. Using fallback text.")
-        st.markdown(
-            f"<h1 style='text-align: center; color: {BRAND_ORANGE};'>PRIMARC PECAN</h1>",
-            unsafe_allow_html=True
-        )
-    except Exception as e:
-        logger.error(f"Error loading logo: {e}")
-        st.markdown(
-            f"<h1 style='text-align: center; color: {BRAND_ORANGE};'>PRIMARC PECAN</h1>",
-            unsafe_allow_html=True
-        )
-
-# ============================================================================
-# 3. UTILITY FUNCTIONS - TIME & DATA CONVERSION
-# ============================================================================
-
-def aht_to_minutes(time_str: str) -> float:
-    """
-    Convert Average Handle Time string to minutes.
+# --- ADVANCED CSS FOR MODERN UI ---
+st.markdown("""
+    <style>
+    /* Main background */
+    .stApp { background-color: #F8F9FA; }
     
-    Handles formats: HH:MM:SS, MM:SS, or numeric values
+    /* Custom Card Styling */
+    .metric-card {
+        background-color: white;
+        padding: 20px;
+        border-radius: 15px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+        border-top: 5px solid #FF6B00;
+        text-align: center;
+    }
     
-    Args:
-        time_str: Time string in format HH:MM:SS or MM:SS
-        
-    Returns:
-        float: Total time in minutes
-    """
-    try:
-        if pd.isna(time_str) or str(time_str).strip() == "" or str(time_str) == "0":
-            return 0
-        
-        parts = str(time_str).split(':')
-        
-        if len(parts) == 3:  # HH:MM:SS
-            return int(parts[0]) * 60 + int(parts[1]) + int(parts[2]) / 60
-        elif len(parts) == 2:  # MM:SS
-            return int(parts[0]) + int(parts[1]) / 60
-        else:
-            return float(time_str) if time_str else 0
-    except (ValueError, TypeError):
-        logger.warning(f"Could not convert AHT value: {time_str}")
-        return 0
+    .metric-title { color: #6c757d; font-size: 14px; font-weight: 600; text-transform: uppercase; }
+    .metric-value { color: #FF6B00; font-size: 32px; font-weight: 800; }
+    
+    /* Titles */
+    h1, h2, h3 { color: #2D3436 !important; font-family: 'Inter', sans-serif; }
+    
+    /* Sidebar styling */
+    section[data-testid="stSidebar"] { background-color: #ffffff; border-right: 1px solid #eee; }
+    </style>
+    """, unsafe_allow_html=True)
 
-def find_column(targets: List[str], dataframe: Optional[pd.DataFrame]) -> Optional[str]:
-    """
-    Intelligently find a column in DataFrame by multiple possible names.
-    
-    Case-insensitive search. Returns first match found.*
+# --- MOCK DATA GENERATOR ---
+def load_data():
+    agents = ['Sarah Jenkins', 'Mark Lohan', 'Elena Rodriguez', 'David Kim', 'Rachel Wong']
+    data = {
+        'Agent': agents,
+        'Inbound Calls': [45, 32, 28, 50, 42],
+        'Outbound Calls': [12, 25, 8, 15, 18],
+        'Emails': [30, 20, 55, 25, 38],
+        'Ticket AHT (min)': [4.2, 5.1, 4.8, 3.9, 4.5],
+        'Call AHT (min)': [5.5, 6.2, 5.8, 5.1, 5.7],
+        'Audit Score': [98, 88, 95, 91, 94],
+        'CSAT': [4.9, 4.6, 4.8, 4.4, 4.9]
+    }
+    return pd.DataFrame(data)
+
+df = load_data()
+orange_shades = ['#FF6B00', '#FF8E3C', '#FFAE70', '#FFCDA3', '#FFEBD6']
+
+# --- HEADER ---
+st.title("🍊 OpsView | Support Intelligence")
+st.markdown("Global Team Performance Metrics & Agent Audit Overview")
+st.write("---")
+
+# --- ROW 1: PROMINENT DATA PANELS ---
+col1, col2, col3, col4 = st.columns(4)
+
+with col1:
+    st.markdown('<div class="metric-card"><p class="metric-title">Total Tickets</p><p class="metric-value">2,840</p></div>', unsafe_allow_html=True)
+with col2:
+    st.markdown('<div class="metric-card"><p class="metric-title">Tickets Resolved</p><p class="metric-value">2,105</p></div>', unsafe_allow_html=True)
+with col3:
+    st.markdown('<div class="metric-card"><p class="metric-title">Tickets Closed</p><p class="metric-value">1,980</p></div>', unsafe_allow_html=True)
+with col4:
+    st.markdown('<div class="metric-card"><p class="metric-title">Live CSAT</p><p class="metric-value">4.72</p></div>', unsafe_allow_html=True)
+
+st.write("##")
+
+# --- ROW 2: DYNAMIC CHARTS (AHT & CSAT) ---
+c1, c2 = st.columns([2, 1])
+
+with c1:
+    st.subheader("⏱️ Handling Time Dynamics")
+    fig_aht = go.Figure()
+    fig_aht.add_trace(go.Bar(x=df['Agent'], y=df['Ticket AHT (min)'], name='Ticket AHT', marker_color='#FF6B00'))
+    fig_aht.add_trace(go.Bar(x=df['Agent'], y=df['Call AHT (min)'], name='Call AHT', marker_color='#FFB380'))
+    fig_aht.update_layout(barmode='group', plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', 
+                          legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+    st.plotly_chart(fig_aht, use_container_width=True)
+
+with c2:
+    st.subheader("⭐ CSAT Distribution (Emails)")
+    fig_csat = px.line(df, x='Agent', y='CSAT', markers=True, color_discrete_sequence=['#FF6B00'])
+    fig_csat.update_layout(yaxis_range=[0,5], plot_bgcolor='rgba(0,0,0,0)')
+    st.plotly_chart(fig_csat, use_container_width=True)
+
+# --- ROW 3: PRODUCTIVITY & CONTRIBUTION ---
+st.write("---")
+st.subheader("👥 Agent Contribution Breakdown")
+tab1, tab2 = st.tabs(["Volume Analysis", "Call Audit Data"])
+
+with tab1:
+    # Stacked Bar for Contribution
+    fig_contrib = px.bar(df, x="Agent", y=["Inbound Calls", "Outbound Calls", "Emails"],
+                        title="Workload Distribution by Channel",
+                        color_discrete_sequence=orange_shades)
+    fig_contrib.update_layout(plot_bgcolor='rgba(0,0,0,0)')
+    st.plotly_chart(fig_contrib, use_container_width=True)
+
+with tab2:
+    audit_col1, audit_col2 = st.columns([1, 2])
+    with audit_col1:
+        st.markdown("### Team Quality Avg")
+        avg_audit = df['Audit_Score'].mean()
+        st.metric("Overall Audit Score", f"{avg_audit}%", "+1.2%")
+    with audit_col2:
+        st.dataframe(df[['Agent', 'Audit_Score', 'CSAT']].style.background_gradient(cmap='Oranges'), use_container_width=True)
+
+# --- FOOTER ---
+st.markdown("<br><p style='text-align: center; color: #BDC3C7;'>OpsView Dashboard v2.0 | Powering Support Excellence</p>", unsafe_allow_html=True)
