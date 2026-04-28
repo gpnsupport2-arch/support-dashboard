@@ -5,7 +5,7 @@ import base64
 from streamlit_gsheets import GSheetsConnection
 
 # --- 1. BRANDING & PERSISTENT STYLE ---
-st.set_page_config(page_title="Primarc Pecan | Support Portal", layout="wide")
+st.set_page_config(page_title="Primarc Pecan | Operations Portal", layout="wide")
 BRAND_ORANGE, BRAND_NAVY, BRAND_WHITE = "#F37021", "#101828", "#FFFFFF"
 
 st.markdown(f"""
@@ -13,7 +13,17 @@ st.markdown(f"""
     .stApp {{ background: linear-gradient(180deg, {BRAND_NAVY} 0%, #1D2939 100%); }}
     h1, h2, h3, p, span, label, .stMarkdown {{ color: {BRAND_WHITE} !important; }}
     
-    /* Dropdown Selection Fix (Dark text on white for visibility) */
+    /* Center the logo at the top */
+    .logo-container {{
+        display: flex;
+        justify-content: center;
+        padding: 20px;
+        background-color: rgba(255, 255, 255, 0.05);
+        border-radius: 0 0 20px 20px;
+        margin-bottom: 20px;
+    }}
+
+    /* Dropdown Selection Fix */
     div[data-baseweb="select"] > div {{ background-color: white !important; color: {BRAND_NAVY} !important; }}
     div[role="listbox"] div {{ color: {BRAND_NAVY} !important; }}
     
@@ -32,7 +42,19 @@ st.markdown(f"""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. MULTI-SOURCE DATA LOADER ---
+# --- 2. LOGO PLACEMENT (TOP CENTER) ---
+try:
+    with open('primarc_pecan_logo.jpg', 'rb') as f:
+        logo_data = base64.b64encode(f.read()).decode()
+    st.markdown(
+        f'<div class="logo-container"><img src="data:image/jpeg;base64,{logo_data}" width="250"></div>', 
+        unsafe_allow_html=True
+    )
+except:
+    # Fallback if file is missing
+    st.markdown("<h1 style='text-align: center; color: #F37021;'>PRIMARC PECAN</h1>", unsafe_allow_html=True)
+
+# --- 3. DATA LOADER ---
 st.sidebar.header("🔌 Data Sources")
 
 def load_data_source(label, key_id):
@@ -69,9 +91,7 @@ def find_col(targets, df):
             if t.lower() in col.lower(): return col
     return None
 
-# --- 3. TOP KPI SECTION (RESTORED) ---
-st.title("🎧 Support Operations Portal")
-
+# --- 4. KPI SECTION ---
 if df_s is not None:
     status_col = find_col(['status', 'ticket status'], df_s)
     chan_col = find_col(['channel'], df_s)
@@ -96,7 +116,7 @@ if df_s is not None:
 
 st.markdown("---")
 
-# --- 4. TABS SECTION (SUPPORT LOG REMOVED) ---
+# --- 5. TABS ---
 t1, t2 = st.tabs(["📊 Performance Overview", "🕵️ Audit Tracker"])
 
 # SUPPORT ANALYTICS
@@ -105,13 +125,14 @@ if df_s is not None:
     c_col = find_col(['channel'], df_s)
 
     with t1:
-        st.subheader("Executive Distribution & Deep-Dive")
         c1, c2 = st.columns(2)
         with c1:
+            st.subheader("Executive Distribution")
             fig1 = px.pie(df_s, names=e_col, hole=0.4, color_discrete_sequence=px.colors.sequential.Oranges_r)
             fig1.update_layout(paper_bgcolor='rgba(0,0,0,0)', font=dict(color="white"))
             st.plotly_chart(fig1, use_container_width=True)
         with c2:
+            st.subheader("Agent Deep-Dive")
             agent_names = sorted(df_s[e_col].dropna().unique())
             agent = st.selectbox("Select Executive Name:", agent_names, key="sel_agent_tab")
             sub = df_s[df_s[e_col] == agent]
@@ -128,7 +149,6 @@ with t2:
 
         if ae_col and as_col:
             df_a[as_col] = pd.to_numeric(df_a[as_col], errors='coerce')
-            # 4-5 is Positive, 3 and below is Negative
             df_a['Sentiment'] = df_a[as_col].apply(lambda x: "Positive" if x >= 4 else ("Negative" if x <= 3 else "Neutral"))
             
             m1, m2, m3 = st.columns(3)
@@ -137,18 +157,15 @@ with t2:
             pos_rate = (len(df_a[df_a['Sentiment']=='Positive']) / len(df_a)) * 100 if len(df_a)>0 else 0
             m3.metric("Positive Rating %", f"{pos_rate:.1f}%")
 
-            st.subheader("Executive Audit Summary")
             st.dataframe(df_a.groupby(ae_col).agg({as_col: ['count', 'mean']}).reset_index(), use_container_width=True)
-        else:
-            st.error("Audit sheet missing 'Executive' or 'Score' columns.")
     else:
-        st.info("ℹ️ Connect Audit Source in sidebar (Excel or Google Sheet).")
+        st.info("ℹ️ Connect Audit Source in sidebar.")
 
-# --- 5. PREDICTIONS (PERMANENT BOTTOM) ---
+# --- 6. PREDICTIONS ---
 st.markdown("---")
 st.subheader("🔮 Predictive Insights")
 p1, p2 = st.columns(2)
 with p1:
     st.markdown('<div class="insight-card"><b>📅 Backlog Forecast</b><br>Remaining Volume calculated based on Support Data.</div>', unsafe_allow_html=True)
 with p2:
-    st.markdown('<div class="insight-card"><b>🚀 Capacity Planning</b><br>Current quality scores suggest stable executive performance.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="insight-card"><b>🚀 Capacity Planning</b><br>Quality scores 4-5 are trending positively.</div>', unsafe_allow_html=True)
