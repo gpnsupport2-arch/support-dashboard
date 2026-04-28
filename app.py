@@ -23,7 +23,7 @@ st.markdown(f"""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. CENTERED LOGO ---
+# --- 2. LOGO ---
 try:
     with open('primarc_pecan_logo.jpg', 'rb') as f:
         logo_data = base64.b64encode(f.read()).decode()
@@ -31,7 +31,7 @@ try:
 except:
     st.markdown("<h1 style='text-align: center; color: #F37021;'>PRIMARC PECAN</h1>", unsafe_allow_html=True)
 
-# --- 3. HELPERS ---
+# --- 3. DATA HELPERS ---
 def find_col(targets, df):
     if df is None: return None
     for t in targets:
@@ -41,14 +41,14 @@ def find_col(targets, df):
 
 def aht_to_minutes(time_str):
     try:
-        if pd.isna(time_str) or str(time_str).strip() in ["", "0"]: return 0
+        if pd.isna(time_str) or str(time_str).strip() in ["", "0", "nan"]: return 0
         parts = str(time_str).split(':')
         if len(parts) == 3: return int(parts[0])*60 + int(parts[1]) + int(parts[2])/60
         elif len(parts) == 2: return int(parts[0]) + int(parts[1])/60
         return 0
     except: return 0
 
-# --- 4. SIDEBAR DATA CONNECTORS ---
+# --- 4. SIDEBAR DATA LOADER ---
 st.sidebar.header("🔌 Data Connectors")
 def load_data():
     mode = st.sidebar.radio("Data Source Type", ["Excel/CSV", "Google Sheet"])
@@ -65,21 +65,21 @@ def load_data():
             return pd.read_csv(file) if file.name.endswith('.csv') else pd.read_excel(file)
     return None
 
-df = load_data()
+df_raw = load_data()
 
-# --- 5. MAIN DASHBOARD LOGIC ---
-if df is not None:
-    # Cleanup
+# --- 5. DASHBOARD MAIN ---
+if df_raw is not None:
+    df = df_raw.copy()
     df.columns = [str(c).strip() for c in df.columns]
     
-    # Mapping
+    # Accurate Mapping for your file headers
     agent_col = find_col(['agent', 'executive'], df)
     csat_col = find_col(['csat', 'rating'], df)
     aht_col = find_col(['aht'], df)
     cat_col = find_col(['category'], df)
-    tk_col = find_col(['ticket', 'id'], df)
+    tk_col = find_col(['ticket', 'order'], df)
 
-    # TOP KPI ROW
+    # Global KPI Row
     k1, k2, k3, k4 = st.columns(4)
     total_calls = len(df)
     k1.metric("Total Calls", total_calls)
@@ -87,20 +87,18 @@ if df is not None:
     if aht_col:
         df['AHT_Mins'] = df[aht_col].apply(aht_to_minutes)
         avg_aht = df[df['AHT_Mins'] > 0]['AHT_Mins'].mean()
-        k2.metric("Avg Handling Time", f"{avg_aht:.2f} min")
+        k2.metric("Avg Handling Time", f"{avg_aht:.2f} min" if not pd.isna(avg_aht) else "0.00 min")
 
     if csat_col:
         valid_csats = df[df[csat_col].notna() & ~df[csat_col].astype(str).str.contains('Unanswered', case=False)]
-        k3.metric("Total CSAT Collected", len(valid_csats))
-        k4.metric("CSAT Collection %", f"{(len(valid_csats)/total_calls*100):.1f}%")
+        k3.metric("CSATs Collected", len(valid_csats))
+        k4.metric("Collection %", f"{(len(valid_csats)/total_calls*100):.1f}%")
 
     st.markdown("---")
+    tabs = st.tabs(["📊 Performance Overview", "🕵️ Audit Tracker", "📋 Call Log"])
 
-    # TABS
-    t1, t2, t3 = st.tabs(["📊 Performance Overview", "🕵️ Audit Tracker", "📋 Raw Data Log"])
-
-    # --- TAB 1: PERFORMANCE OVERVIEW ---
-    with t1:
+    # --- TAB 1: PERFORMANCE ---
+    with tabs[0]:
         st.subheader("Workload & Distribution")
         c1, c2 = st.columns(2)
         with c1:
@@ -115,11 +113,11 @@ if df is not None:
                 fig_bar.update_layout(paper_bgcolor='rgba(0,0,0,0)', font=dict(color="white"))
                 st.plotly_chart(fig_bar, use_container_width=True)
 
-    # --- TAB 2: AUDIT TRACKER (RESTORED) ---
-    with t2:
-        st.subheader("Executive CSAT & Quality Audit")
+    # --- TAB 2: AUDIT TRACKER ---
+    with tabs[1]:
+        st.subheader("Executive quality & CSAT Performance")
         if agent_col and csat_col:
-            # Rating Logic
+            # Rating Sentiment Logic
             def get_sentiment(val):
                 v = str(val).lower()
                 if any(x in v for x in ['5', '4', 'excellent', 'good']): return "Positive"
@@ -128,7 +126,7 @@ if df is not None:
 
             df['Sentiment'] = df[csat_col].apply(get_sentiment)
             
-            # Agent-wise Summary Table
+            # Agent Summary Table
             summary = df.groupby(agent_col).agg(
                 Calls=(df.columns[0], 'count'),
                 CSATs=('Sentiment', lambda x: (x != "No Rating").sum()),
@@ -137,28 +135,28 @@ if df is not None:
             ).reset_index()
             
             summary['Collection %'] = (summary['CSATs'] / summary['Calls'] * 100).round(1)
-            summary.columns = ['Executive Name', 'Calls Taken', 'CSAT Collected', 'Positive (4-5)', 'Negative (1-3)', 'Collection %']
+            summary.columns = ['Agent Name', 'Calls Taken', 'CSAT Collected', 'Positive (4-5)', 'Negative (1-3)', 'Collection %']
             
             st.dataframe(summary.sort_values('Calls Taken', ascending=False), use_container_width=True)
             
-            # Sentiment Pie
+            # Sentiment Chart
             valid_only = df[df['Sentiment'] != "No Rating"]
-            st.plotly_chart(px.pie(valid_only, names='Sentiment', hole=0.4, title="Overall Sentiment Split",
+            st.plotly_chart(px.pie(valid_only, names='Sentiment', hole=0.4, title="Overall CSAT Split",
                                    color_discrete_map={'Positive':'#22C55E','Negative':'#EF4444'}), use_container_width=True)
         else:
-            st.warning("Audit columns missing. Please ensure your file has 'Agent' and 'Csat'.")
+            st.warning("Audit columns missing. Ensure your file contains 'Agent' and 'Csat'.")
 
-    # --- TAB 3: DATA LOG ---
-    with t3:
-        st.subheader("Full Support Tracker Log")
+    # --- TAB 3: LOG ---
+    with tabs[2]:
+        st.subheader("Support Tracker Log")
         st.dataframe(df, use_container_width=True)
 
     # FOOTER
     st.markdown("---")
     st.subheader("🔮 Predictive Insights")
     p1, p2 = st.columns(2)
-    with p1: st.markdown('<div class="insight-card"><b>📅 Volume Forecast:</b> Stable workload based on historical trends.</div>', unsafe_allow_html=True)
-    with p2: st.markdown('<div class="insight-card"><b>🚀 Capacity Planning:</b> Current quality scores (4-5) are meeting the 80% target.</div>', unsafe_allow_html=True)
+    with p1: st.markdown('<div class="insight-card"><b>📅 Volume Forecast:</b> Stable March trends.</div>', unsafe_allow_html=True)
+    with p2: st.markdown('<div class="insight-card"><b>🚀 Focus:</b> Target high-volume agents for CSAT training.</div>', unsafe_allow_html=True)
 
 else:
-    st.info("👋 Welcome! Please upload your Excel file or connect your Google Sheet in the sidebar.")
+    st.info("👋 Welcome! Please upload your 'Mar'26 - Call' file in the sidebar to start.")
