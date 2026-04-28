@@ -65,85 +65,95 @@ def load_data(label):
         if file: return pd.read_csv(file) if file.name.endswith('.csv') else pd.read_excel(file)
     return None
 
-df_s = load_data("Support")
+df_main = load_data("Call/Audit")
 
-# --- 5. DASHBOARD LOGIC ---
-if df_s is not None:
-    df_s.columns = [str(c).strip() for c in df_s.columns]
+# --- 5. MAIN DASHBOARD ---
+if df_main is not None:
+    df_main.columns = [str(c).strip() for c in df_main.columns]
     
-    # Column Mapping
-    agent_col = find_col(['agent', 'executive'], df_s)
-    csat_col = find_col(['csat', 'rating'], df_s)
-    aht_col = find_col(['aht'], df_s)
-    cat_col = find_col(['category'], df_s)
-    tk_col = find_col(['ticket', 'id'], df_s)
+    # Core Mapping
+    agent_col = find_col(['agent', 'executive'], df_main)
+    csat_col = find_col(['csat', 'rating'], df_main)
+    aht_col = find_col(['aht'], df_main)
+    cat_col = find_col(['category'], df_main)
+    tk_col = find_col(['ticket', 'id'], df_main)
 
-    t1, t2, t3 = st.tabs(["📊 Performance Overview", "📋 Support Ticket Log", "🕵️ Audit Tracker"])
+    t1, t2, t3 = st.tabs(["📊 Performance Overview", "📋 Call Tracker Log", "🕵️ Audit Tracker"])
 
     # --- TAB 1: PERFORMANCE ---
     with t1:
-        st.title("🎧 Support Operations")
+        st.title("🎧 Operations Performance")
         m1, m2, m3 = st.columns(3)
-        m1.metric("Total Tickets", len(df_s))
+        m1.metric("Total Calls", len(df_main))
         
         if aht_col:
-            df_s['AHT_Mins'] = df_s[aht_col].apply(aht_to_minutes)
-            avg_aht = df_s[df_s['AHT_Mins'] > 0]['AHT_Mins'].mean()
+            df_main['AHT_Mins'] = df_main[aht_col].apply(aht_to_minutes)
+            avg_aht = df_main[df_main['AHT_Mins'] > 0]['AHT_Mins'].mean()
             m2.metric("Avg Handling Time", f"{avg_aht:.2f} min")
-
+        
         c1, c2 = st.columns(2)
         with c1:
-            st.subheader("Workload by Agent")
+            st.subheader("Workload Share")
             if agent_col:
-                st.plotly_chart(px.pie(df_s, names=agent_col, hole=0.4, color_discrete_sequence=px.colors.sequential.Oranges_r), use_container_width=True)
+                st.plotly_chart(px.pie(df_main, names=agent_col, hole=0.4, color_discrete_sequence=px.colors.sequential.Oranges_r), use_container_width=True)
         with c2:
-            st.subheader("Agent Deep-Dive")
-            if agent_col:
-                agent_list = sorted(df_s[agent_col].dropna().unique())
-                sel_agent = st.selectbox("Select Agent:", agent_list)
-                sub = df_s[df_s[agent_col] == sel_agent]
-                if cat_col:
-                    st.plotly_chart(px.bar(sub[cat_col].value_counts().reset_index(), x='index', y=cat_col, color_discrete_sequence=[BRAND_ORANGE]), use_container_width=True)
+            st.subheader("Category Breakdown")
+            if cat_col:
+                st.plotly_chart(px.bar(df_main[cat_col].value_counts().reset_index(), x='index', y=cat_col, color_discrete_sequence=[BRAND_ORANGE]), use_container_width=True)
 
-    # --- TAB 2: LOG ---
+    # --- TAB 2: DATA LOG ---
     with t2:
-        st.title("📋 Live Support Tracker")
-        st.dataframe(df_s, use_container_width=True)
+        st.title("📋 Call Tracker Data")
+        st.dataframe(df_main, use_container_width=True)
 
-    # --- TAB 3: AUDIT TRACKER ---
+    # --- TAB 3: AUDIT TRACKER (FULLY RESTORED) ---
     with t3:
-        st.title("🕵️ Quality & CSAT Audit")
+        st.title("🕵️ Executive Quality Audit")
         if agent_col and csat_col:
+            # Logic: 4-5 Pos, 1-3 Neg
             def get_sentiment(val):
                 v = str(val).lower()
                 if any(x in v for x in ['5', '4', 'excellent', 'good']): return "Positive"
                 if any(x in v for x in ['1', '2', '3', 'bad', 'poor', 'average']): return "Negative"
                 return "No Rating"
 
-            df_s['Sentiment'] = df_s[csat_col].apply(get_sentiment)
-            valid = df_s[df_s['Sentiment'] != "No Rating"]
+            df_main['Sentiment'] = df_main[csat_col].apply(get_sentiment)
+            valid_csats = df_main[df_main['Sentiment'] != "No Rating"]
             
-            k1, k2 = st.columns(2)
-            k1.metric("Total CSAT Collected", len(valid))
-            k2.metric("Collection %", f"{(len(valid)/len(df_s)*100):.1f}%")
+            # Audit KPIs
+            k1, k2, k3 = st.columns(3)
+            k1.metric("CSATs Collected", len(valid_csats))
+            k2.metric("Collection Rate", f"{(len(valid_csats)/len(df_main)*100):.1f}%")
+            
+            # Score Calculation (Extract digits)
+            df_main['Score'] = pd.to_numeric(df_main[csat_col].astype(str).str.extract('(\d+)')[0], errors='coerce')
+            k3.metric("Avg Quality Score", f"{df_main['Score'].mean():.2f}")
 
-            summary = df_s.groupby(agent_col).agg(
-                calls=(df_s.columns[0], 'count'),
-                csats=('Sentiment', lambda x: (x != "No Rating").sum()),
-                pos=('Sentiment', lambda x: (x == "Positive").sum()),
-                neg=('Sentiment', lambda x: (x == "Negative").sum())
+            # Performance Table
+            st.subheader("Agent-wise CSAT Performance")
+            audit_summary = df_main.groupby(agent_col).agg(
+                Calls=(df_main.columns[0], 'count'),
+                CSAT_Count=('Sentiment', lambda x: (x != "No Rating").sum()),
+                Positive=('Sentiment', lambda x: (x == "Positive").sum()),
+                Negative=('Sentiment', lambda x: (x == "Negative").sum())
             ).reset_index()
-            summary['Collection %'] = (summary['csats'] / summary['calls'] * 100).round(1)
-            summary.columns = ['Agent', 'Calls', 'CSATs', 'Positive (4-5)', 'Negative (1-3)', 'Coll %']
-            st.dataframe(summary.sort_values('Calls', ascending=False), use_container_width=True)
             
-            st.plotly_chart(px.pie(valid, names='Sentiment', hole=0.4, color_discrete_map={'Positive':'#22C55E','Negative':'#EF4444'}), use_container_width=True)
+            audit_summary['Collection %'] = (audit_summary['CSAT_Count'] / audit_summary['Calls'] * 100).round(1)
+            audit_summary.columns = ['Executive Name', 'Calls Taken', 'CSAT Collected', 'Positive (4-5)', 'Negative (1-3)', 'Collection %']
+            
+            st.dataframe(audit_summary.sort_values('Calls Taken', ascending=False), use_container_width=True)
+            
+            # Sentiment Split Pie
+            st.plotly_chart(px.pie(valid_csats, names='Sentiment', hole=0.4, title="Overall Sentiment Split",
+                                   color_discrete_map={'Positive':'#22C55E','Negative':'#EF4444'}), use_container_width=True)
+        else:
+            st.warning("Ensure your file has 'Agent' and 'Csat' columns for the Audit Tracker.")
 
     st.markdown("---")
-    st.subheader("🔮 Predictive Insights")
+    st.subheader("🔮 Operations Insights")
     p1, p2 = st.columns(2)
-    with p1: st.markdown('<div class="insight-card"><b>📅 Forecast:</b> Stable volume.</div>', unsafe_allow_html=True)
-    with p2: st.markdown('<div class="insight-card"><b>🚀 Tip:</b> Increase CSAT collection.</div>', unsafe_allow_html=True)
+    with p1: st.markdown('<div class="insight-card"><b>📅 Forecast:</b> March 2026 volume is trending stable.</div>', unsafe_allow_html=True)
+    with p2: st.markdown('<div class="insight-card"><b>🚀 Focus:</b> Target a 30% CSAT collection rate.</div>', unsafe_allow_html=True)
 
 else:
-    st.info("👋 Welcome! Please upload your 'Mar'26 - Call' file in the sidebar to view the dashboard.")
+    st.info("👋 Welcome! Please upload your Tracker file in the sidebar to populate the portal.")
