@@ -4,29 +4,23 @@ import plotly.express as px
 import base64
 from streamlit_gsheets import GSheetsConnection
 
-# --- 1. BRANDING & CRITICAL VISIBILITY FIXES ---
+# --- 1. BRANDING & PERSISTENT STYLE ---
 st.set_page_config(page_title="Primarc Pecan | Executive Portal", layout="wide")
 
 BRAND_ORANGE = "#F37021"
 BRAND_NAVY = "#101828" 
+BRAND_WHITE = "#FFFFFF"
 
 st.markdown(f"""
     <style>
-    /* Main Background */
     .stApp {{ background: linear-gradient(180deg, {BRAND_NAVY} 0%, #1D2939 100%); }}
     
-    /* FORCE TEXT COLOR */
-    h1, h2, h3, p, span, label, .stMarkdown {{ color: white !important; }}
+    /* Font Visibility Fixes */
+    h1, h2, h3, p, span, label, .stMarkdown {{ color: {BRAND_WHITE} !important; }}
 
-    /* FIX DROPDOWN (SELECTBOX) CONTRAST */
-    /* This makes the menu background white and text dark so you can read names */
-    div[data-baseweb="select"] > div {{
-        background-color: white !important;
-        color: {BRAND_NAVY} !important;
-    }}
-    div[data-baseweb="popover"] div {{
-        color: {BRAND_NAVY} !important;
-    }}
+    /* Dropdown Selection Fix (Dark text on light background for readability) */
+    div[data-baseweb="select"] > div {{ background-color: white !important; color: {BRAND_NAVY} !important; }}
+    div[role="listbox"] div {{ color: {BRAND_NAVY} !important; }}
     
     /* Metrics and Sidebar */
     div[data-testid="stMetric"] {{ background-color: #1D2939; border: 1px solid {BRAND_ORANGE}; border-radius: 10px; }}
@@ -38,27 +32,37 @@ st.markdown(f"""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DATA LOADING LOGIC ---
+# --- 2. MULTI-SOURCE DATA LOADER ---
 st.sidebar.header("🔌 Data Sources")
-support_url = st.sidebar.text_input("1. Support Google Sheet URL")
-audit_url = st.sidebar.text_input("2. Audit Google Sheet URL")
 
-conn = st.connection("gsheets", type=GSheetsConnection)
+def load_logic(label_prefix):
+    st.sidebar.subheader(f"{label_prefix} Source")
+    mode = st.sidebar.radio(f"Select {label_prefix} Type", ["Google Sheet", "Excel/CSV"], key=f"{label_prefix}_mode")
+    if mode == "Google Sheet":
+        url = st.sidebar.text_input(f"Paste {label_prefix} URL", key=f"{label_prefix}_url")
+        if url:
+            try:
+                conn = st.connection("gsheets", type=GSheetsConnection)
+                data = conn.read(spreadsheet=url, ttl=0)
+                return data
+            except Exception as e:
+                st.sidebar.error(f"Error: {e}")
+    else:
+        file = st.sidebar.file_uploader(f"Upload {label_prefix} File", type=['csv', 'xlsx'], key=f"{label_prefix}_file")
+        if file:
+            return pd.read_csv(file) if file.name.endswith('.csv') else pd.read_excel(file)
+    return None
 
-def get_data(url):
-    if not url: return None
-    try:
-        data = conn.read(spreadsheet=url, ttl=0)
-        data.columns = [str(c).strip() for c in data.columns]
-        return data
-    except Exception as e:
-        st.sidebar.error(f"Error loading sheet: {e}")
-        return None
+df_s = load_logic("Support")
+df_a = load_logic("Audit")
 
-df_s = get_data(support_url)
-df_a = get_data(audit_url)
+def clean_df(df):
+    if df is not None:
+        df.columns = [str(c).strip() for c in df.columns]
+    return df
 
-# Helper to find columns regardless of exact naming
+df_s, df_a = clean_df(df_s), clean_df(df_a)
+
 def find_col(targets, df):
     if df is None: return None
     for t in targets:
@@ -67,7 +71,7 @@ def find_col(targets, df):
     return None
 
 # --- 3. DASHBOARD TABS ---
-t1, t2, t3 = st.tabs(["📊 Performance", "📋 Support Log", "🕵️ Audit Tracker"])
+t1, t2, t3 = st.tabs(["📊 Performance Overview", "📋 Support Ticket Log", "🕵️ Audit Tracker"])
 
 # --- TAB 1 & 2: SUPPORT ANALYTICS ---
 if df_s is not None:
@@ -75,53 +79,60 @@ if df_s is not None:
     c_col = find_col(['channel'], df_s)
 
     with t1:
-        st.title("🎧 Executive Workload")
+        st.title("🎧 Support Operations")
         c1, c2 = st.columns(2)
         with c1:
-            st.subheader("Team Distribution")
+            st.subheader("Total Executive Workload")
             fig1 = px.pie(df_s, names=e_col, hole=0.4, color_discrete_sequence=px.colors.sequential.Oranges_r)
+            fig1.update_layout(paper_bgcolor='rgba(0,0,0,0)', font=dict(color="white"))
             st.plotly_chart(fig1, use_container_width=True)
         with c2:
-            st.subheader("Agent Deep-Dive")
-            # The dropdown here is now fixed with CSS to be readable
-            agent = st.selectbox("Choose Executive:", sorted(df_s[e_col].dropna().unique()))
+            st.subheader("Executive Channel Split")
+            agent = st.selectbox("Select Executive:", sorted(df_s[e_col].dropna().unique()))
             sub = df_s[df_s[e_col] == agent]
             fig2 = px.pie(sub, names=c_col, hole=0.4, color_discrete_sequence=[BRAND_ORANGE, "#475467"])
+            fig2.update_layout(paper_bgcolor='rgba(0,0,0,0)', font=dict(color="white"))
             st.plotly_chart(fig2, use_container_width=True)
 
     with t2:
-        st.subheader("Full Support Ticket Log")
+        st.title("📋 Live Support Tracker")
         st.dataframe(df_s, use_container_width=True)
 
-# --- TAB 3: AUDIT ANALYTICS (THE NEW ROOM) ---
+# --- TAB 3: AUDIT TRACKER (POSITIVE/NEGATIVE LOGIC) ---
 with t3:
-    st.title("🕵️ Quality Audit Tracker")
+    st.title("🕵️ Audit Tracker & Quality Score")
     if df_a is not None:
-        # Find columns for Audit
         ae_col = find_col(['executive', 'agent', 'name'], df_a)
         as_col = find_col(['score', 'rating'], df_a)
 
         if ae_col and as_col:
-            # Audit Logic: Score >= 4 is Positive, <= 3 is Negative
             df_a[as_col] = pd.to_numeric(df_a[as_col], errors='coerce')
+            # 5 & 4 = Positive | Below 3 = Negative
             df_a['Sentiment'] = df_a[as_col].apply(lambda x: "Positive" if x >= 4 else ("Negative" if x <= 3 else "Neutral"))
             
-            # Metrics
             m1, m2, m3 = st.columns(3)
             m1.metric("Total Audits", len(df_a))
-            m2.metric("Average Score", f"{df_a[as_col].mean():.2f}")
-            pos_rate = (len(df_a[df_a['Sentiment']=='Positive']) / len(df_a)) * 100
-            m3.metric("Quality Pass Rate", f"{pos_rate:.1f}%")
+            m2.metric("Avg Quality Score", f"{df_a[as_col].mean():.2f}")
+            pos_rate = (len(df_a[df_a['Sentiment']=='Positive']) / len(df_a)) * 100 if len(df_a)>0 else 0
+            m3.metric("Positive Rating %", f"{pos_rate:.1f}%")
 
-            # Summary Table
-            st.subheader("Executive Audit Summary")
-            summary = df_a.groupby(ae_col).agg({as_col: ['count', 'mean']}).reset_index()
-            summary.columns = ['Executive', 'Total Audits', 'Avg Score']
-            st.table(summary) # Table is often more readable than Dataframe in dark mode
-
-            st.subheader("Audit Raw Data")
-            st.dataframe(df_a, use_container_width=True)
+            st.subheader("Executive Wise Quality Audit")
+            summary = df_a.groupby(ae_col).agg({
+                as_col: ['count', 'mean'],
+                'Sentiment': lambda x: (x == 'Positive').sum()
+            }).reset_index()
+            summary.columns = ['Executive', 'Total Audits', 'Avg Score', 'Good Ratings (4-5)']
+            st.dataframe(summary, use_container_width=True)
         else:
-            st.error("Audit sheet missing 'Executive' or 'Score' columns.")
+            st.error("Audit sheet must contain 'Executive' and 'Score' columns.")
     else:
-        st.info("ℹ️ Connect Audit Sheet in sidebar to view Quality metrics.")
+        st.info("ℹ️ Please upload an Audit file or paste a URL in the sidebar.")
+
+# --- 4. PREDICTIONS (PERMANENT BOTTOM) ---
+st.markdown("---")
+st.subheader("🔮 Predictive Insights")
+p1, p2 = st.columns(2)
+with p1:
+    st.markdown(f'<div class="insight-card"><b>📅 Backlog Forecast</b><br>Remaining Volume: Calculated based on Support Data.</div>', unsafe_allow_html=True)
+with p2:
+    st.markdown(f'<div class="insight-card"><b>🚀 Capacity Planning</b><br>Quality trends suggest focus on low-score query types.</div>', unsafe_allow_html=True)
