@@ -5,7 +5,7 @@ import base64
 from streamlit_gsheets import GSheetsConnection
 
 # --- 1. BRANDING & THEME ---
-st.set_page_config(page_title="Primarc Pecan | Support & Audit Hub", layout="wide")
+st.set_page_config(page_title="Primarc Pecan | Multi-Source Dashboard", layout="wide")
 BRAND_ORANGE, BRAND_NAVY, BRAND_WHITE = "#F37021", "#101828", "#FFFFFF"
 
 st.markdown(f"""
@@ -17,9 +17,8 @@ st.markdown(f"""
     div[role="listbox"] div {{ color: {BRAND_NAVY} !important; }}
     div[data-testid="stMetric"] {{ background-color: #1D2939; border: 1px solid {BRAND_ORANGE}; border-radius: 10px; padding: 15px; }}
     [data-testid="stMetricValue"] {{ color: {BRAND_ORANGE} !important; font-size: 32px !important; }}
-    [data-testid="stSidebar"] {{ background-color: {BRAND_NAVY} !important; border-right: 1px solid {BRAND_ORANGE}; }}
+    [data-testid="stSidebar"] {{ background-color: {BRAND_NAVY} !important; border-right: 1px solid {BRAND_ORANGE}; padding-top: 20px; }}
     .stTabs [aria-selected="true"] {{ background-color: {BRAND_ORANGE} !important; border-radius: 5px; }}
-    .insight-card {{ background-color: rgba(255, 255, 255, 0.08); border-left: 5px solid {BRAND_ORANGE}; padding: 20px; border-radius: 8px; }}
     </style>
     """, unsafe_allow_html=True)
 
@@ -48,115 +47,105 @@ def aht_to_minutes(time_str):
         return 0
     except: return 0
 
-# --- 4. SIDEBAR DATA LOADER ---
-st.sidebar.header("🔌 Data Connectors")
-def load_data():
-    mode = st.sidebar.radio("Data Source Type", ["Excel/CSV", "Google Sheet"])
+# --- 4. SEPARATE DATA LOADERS (SIDEBAR) ---
+st.sidebar.title("🔌 Data Connectors")
+
+def universal_loader(label):
+    st.sidebar.subheader(f"📂 {label} Data")
+    mode = st.sidebar.radio(f"Format for {label}", ["Excel/CSV", "Google Sheet"], key=f"mode_{label}")
+    
     if mode == "Google Sheet":
-        url = st.sidebar.text_input("Paste Google Sheet URL")
+        url = st.sidebar.text_input(f"Paste {label} URL", key=f"url_{label}")
         if url:
             try:
                 conn = st.connection("gsheets", type=GSheetsConnection)
                 return conn.read(spreadsheet=url, ttl=0)
-            except: return None
+            except Exception as e:
+                st.sidebar.error(f"Link Error: {e}")
+                return None
     else:
-        file = st.sidebar.file_uploader("Upload Tracker File", type=['csv', 'xlsx'])
+        file = st.sidebar.file_uploader(f"Upload {label} File", type=['csv', 'xlsx'], key=f"file_{label}")
         if file:
-            return pd.read_csv(file) if file.name.endswith('.csv') else pd.read_excel(file)
+            if file.name.endswith('.csv'): return pd.read_csv(file)
+            else: return pd.read_excel(file)
     return None
 
-df_raw = load_data()
+# Load two distinct dataframes
+df_support = universal_loader("Performance")
+st.sidebar.markdown("---")
+df_audit = universal_loader("Audit Tracker")
 
-# --- 5. DASHBOARD MAIN ---
-if df_raw is not None:
-    df = df_raw.copy()
-    df.columns = [str(c).strip() for c in df.columns]
-    
-    # Accurate Mapping for your file headers
-    agent_col = find_col(['agent', 'executive'], df)
-    csat_col = find_col(['csat', 'rating'], df)
-    aht_col = find_col(['aht'], df)
-    cat_col = find_col(['category'], df)
-    tk_col = find_col(['ticket', 'order'], df)
+# --- 5. DASHBOARD TABS ---
+t1, t2, t3 = st.tabs(["📊 Performance Overview", "🕵️ Audit Tracker", "📋 Raw Data Logs"])
 
-    # Global KPI Row
-    k1, k2, k3, k4 = st.columns(4)
-    total_calls = len(df)
-    k1.metric("Total Calls", total_calls)
+# --- PERFORMANCE TAB ---
+with t1:
+    st.title("🎧 Operations Performance")
+    if df_support is not None:
+        df_support.columns = [str(c).strip() for c in df_support.columns]
+        ag_col = find_col(['agent', 'executive'], df_support)
+        cat_col = find_col(['category'], df_support)
+        aht_col = find_col(['aht'], df_support)
 
-    if aht_col:
-        df['AHT_Mins'] = df[aht_col].apply(aht_to_minutes)
-        avg_aht = df[df['AHT_Mins'] > 0]['AHT_Mins'].mean()
-        k2.metric("Avg Handling Time", f"{avg_aht:.2f} min" if not pd.isna(avg_aht) else "0.00 min")
+        m1, m2 = st.columns(2)
+        m1.metric("Total Support Tickets", len(df_support))
+        if aht_col:
+            df_support['AHT_Mins'] = df_support[aht_col].apply(aht_to_minutes)
+            avg_aht = df_support[df_support['AHT_Mins'] > 0]['AHT_Mins'].mean()
+            m2.metric("Avg Handling Time", f"{avg_aht:.2f} min")
 
-    if csat_col:
-        valid_csats = df[df[csat_col].notna() & ~df[csat_col].astype(str).str.contains('Unanswered', case=False)]
-        k3.metric("CSATs Collected", len(valid_csats))
-        k4.metric("Collection %", f"{(len(valid_csats)/total_calls*100):.1f}%")
-
-    st.markdown("---")
-    tabs = st.tabs(["📊 Performance Overview", "🕵️ Audit Tracker", "📋 Call Log"])
-
-    # --- TAB 1: PERFORMANCE ---
-    with tabs[0]:
-        st.subheader("Workload & Distribution")
         c1, c2 = st.columns(2)
         with c1:
-            if agent_col:
-                fig_pie = px.pie(df, names=agent_col, hole=0.4, title="Ticket Share by Agent")
-                fig_pie.update_layout(paper_bgcolor='rgba(0,0,0,0)', font=dict(color="white"))
-                st.plotly_chart(fig_pie, use_container_width=True)
+            if ag_col: st.plotly_chart(px.pie(df_support, names=ag_col, hole=0.4, title="Workload by Agent"), use_container_width=True)
         with c2:
-            if cat_col:
-                fig_bar = px.bar(df[cat_col].value_counts().reset_index(), x='index', y=cat_col, 
-                                 title="Volume by Category", color_discrete_sequence=[BRAND_ORANGE])
-                fig_bar.update_layout(paper_bgcolor='rgba(0,0,0,0)', font=dict(color="white"))
-                st.plotly_chart(fig_bar, use_container_width=True)
+            if cat_col: st.plotly_chart(px.bar(df_support[cat_col].value_counts().reset_index(), x='index', y=cat_col, title="Volume by Category", color_discrete_sequence=[BRAND_ORANGE]), use_container_width=True)
+    else:
+        st.info("Please upload Performance data in the sidebar.")
 
-    # --- TAB 2: AUDIT TRACKER ---
-    with tabs[1]:
-        st.subheader("Executive quality & CSAT Performance")
-        if agent_col and csat_col:
-            # Rating Sentiment Logic
+# --- AUDIT TRACKER TAB ---
+with t2:
+    st.title("🕵️ Quality Audit Tracker")
+    if df_audit is not None:
+        df_audit.columns = [str(c).strip() for c in df_audit.columns]
+        ag_col_a = find_col(['agent', 'executive'], df_audit)
+        cs_col_a = find_col(['csat', 'rating'], df_audit)
+
+        if ag_col_a and cs_col_a:
             def get_sentiment(val):
                 v = str(val).lower()
                 if any(x in v for x in ['5', '4', 'excellent', 'good']): return "Positive"
                 if any(x in v for x in ['1', '2', '3', 'bad', 'poor', 'average']): return "Negative"
                 return "No Rating"
 
-            df['Sentiment'] = df[csat_col].apply(get_sentiment)
+            df_audit['Sentiment'] = df_audit[cs_col_a].apply(get_sentiment)
             
-            # Agent Summary Table
-            summary = df.groupby(agent_col).agg(
-                Calls=(df.columns[0], 'count'),
+            # Summary Metrics
+            valid = df_audit[df_audit['Sentiment'] != "No Rating"]
+            k1, k2 = st.columns(2)
+            k1.metric("CSATs Collected", len(valid))
+            k2.metric("Collection %", f"{(len(valid)/len(df_audit)*100):.1f}%")
+
+            # Agent Table
+            summary = df_audit.groupby(ag_col_a).agg(
+                Calls=(df_audit.columns[0], 'count'),
                 CSATs=('Sentiment', lambda x: (x != "No Rating").sum()),
                 Positive=('Sentiment', lambda x: (x == "Positive").sum()),
                 Negative=('Sentiment', lambda x: (x == "Negative").sum())
             ).reset_index()
+            summary.columns = ['Agent', 'Total Calls', 'CSATs', 'Pos(4-5)', 'Neg(1-3)']
+            st.dataframe(summary, use_container_width=True)
             
-            summary['Collection %'] = (summary['CSATs'] / summary['Calls'] * 100).round(1)
-            summary.columns = ['Agent Name', 'Calls Taken', 'CSAT Collected', 'Positive (4-5)', 'Negative (1-3)', 'Collection %']
-            
-            st.dataframe(summary.sort_values('Calls Taken', ascending=False), use_container_width=True)
-            
-            # Sentiment Chart
-            valid_only = df[df['Sentiment'] != "No Rating"]
-            st.plotly_chart(px.pie(valid_only, names='Sentiment', hole=0.4, title="Overall CSAT Split",
-                                   color_discrete_map={'Positive':'#22C55E','Negative':'#EF4444'}), use_container_width=True)
-        else:
-            st.warning("Audit columns missing. Ensure your file contains 'Agent' and 'Csat'.")
+            st.plotly_chart(px.pie(valid, names='Sentiment', hole=0.4, title="Audit Sentiment Split", color_discrete_map={'Positive':'#22C55E','Negative':'#EF4444'}), use_container_width=True)
+    else:
+        st.info("Please upload Audit data in the sidebar.")
 
-    # --- TAB 3: LOG ---
-    with tabs[2]:
-        st.subheader("Support Tracker Log")
-        st.dataframe(df, use_container_width=True)
-
-    # FOOTER
-    st.markdown("---")
-    st.subheader("🔮 Predictive Insights")
-    p1, p2 = st.columns(2)
-    with p1: st.markdown('<div class="insight-card"><b>📅 Volume Forecast:</b> Stable March trends.</div>', unsafe_allow_html=True)
-    with p2: st.markdown('<div class="insight-card"><b>🚀 Focus:</b> Target high-volume agents for CSAT training.</div>', unsafe_allow_html=True)
-
-else:
-    st.info("👋 Welcome! Please upload your 'Mar'26 - Call' file in the sidebar to start.")
+# --- LOGS TAB ---
+with t3:
+    st.subheader("Data Inspector")
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.write("Performance Data Preview")
+        st.dataframe(df_support, height=300)
+    with col_b:
+        st.write("Audit Data Preview")
+        st.dataframe(df_audit, height=300)
