@@ -13,11 +13,11 @@ st.markdown(f"""
     .stApp {{ background: linear-gradient(180deg, {BRAND_NAVY} 0%, #1D2939 100%); }}
     h1, h2, h3, p, span, label, .stMarkdown {{ color: {BRAND_WHITE} !important; }}
     
-    /* Dropdown Selection Fix */
+    /* Dropdown Selection Fix (Dark text on white for visibility) */
     div[data-baseweb="select"] > div {{ background-color: white !important; color: {BRAND_NAVY} !important; }}
     div[role="listbox"] div {{ color: {BRAND_NAVY} !important; }}
     
-    /* Metric Cards - Fixed for Visibility */
+    /* Metric Cards */
     div[data-testid="stMetric"] {{ 
         background-color: #1D2939; 
         border: 1px solid {BRAND_ORANGE}; 
@@ -32,7 +32,7 @@ st.markdown(f"""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DATA LOADER ---
+# --- 2. MULTI-SOURCE DATA LOADER ---
 st.sidebar.header("🔌 Data Sources")
 
 def load_data_source(label, key_id):
@@ -73,17 +73,14 @@ def find_col(targets, df):
 st.title("🎧 Support Operations Portal")
 
 if df_s is not None:
-    # Identify critical columns for KPIs
     status_col = find_col(['status', 'ticket status'], df_s)
     chan_col = find_col(['channel'], df_s)
     
     k1, k2, k3, k4 = st.columns(4)
     total_t = len(df_s)
     
-    # 1. Total Tickets
     k1.metric("Total Tickets", total_t)
     
-    # 2. Resolved Tickets (Looking for "Resolved" or "Closed")
     if status_col:
         resolved_count = len(df_s[df_s[status_col].astype(str).str.contains('Resolved|Closed|Done', case=False, na=False)])
         res_rate = (resolved_count / total_t * 100) if total_t > 0 else 0
@@ -91,7 +88,6 @@ if df_s is not None:
     else:
         k2.metric("Resolution Rate", "N/A")
 
-    # 3. & 4. Channel Counts
     if chan_col:
         emails = len(df_s[df_s[chan_col].astype(str).str.contains('Email', case=False, na=False)])
         calls = len(df_s[df_s[chan_col].astype(str).str.contains('Call', case=False, na=False)])
@@ -100,8 +96,8 @@ if df_s is not None:
 
 st.markdown("---")
 
-# --- 4. TABS SECTION ---
-t1, t2, t3 = st.tabs(["📊 Performance Overview", "📋 Support Log", "🕵️ Audit Tracker"])
+# --- 4. TABS SECTION (SUPPORT LOG REMOVED) ---
+t1, t2 = st.tabs(["📊 Performance Overview", "🕵️ Audit Tracker"])
 
 # SUPPORT ANALYTICS
 if df_s is not None:
@@ -116,18 +112,15 @@ if df_s is not None:
             fig1.update_layout(paper_bgcolor='rgba(0,0,0,0)', font=dict(color="white"))
             st.plotly_chart(fig1, use_container_width=True)
         with c2:
-            agent = st.selectbox("Select Executive Name:", sorted(df_s[e_col].dropna().unique()), key="sel_agent_tab")
+            agent_names = sorted(df_s[e_col].dropna().unique())
+            agent = st.selectbox("Select Executive Name:", agent_names, key="sel_agent_tab")
             sub = df_s[df_s[e_col] == agent]
             fig2 = px.pie(sub, names=c_col, hole=0.4, color_discrete_sequence=[BRAND_ORANGE, "#475467"])
             fig2.update_layout(paper_bgcolor='rgba(0,0,0,0)', font=dict(color="white"))
             st.plotly_chart(fig2, use_container_width=True)
 
-    with t2:
-        st.subheader("📋 Searchable Ticket Log")
-        st.dataframe(df_s, use_container_width=True)
-
 # AUDIT ANALYTICS
-with t3:
+with t2:
     st.subheader("🕵️ Quality Audit & Ratings")
     if df_a is not None:
         ae_col = find_col(['executive', 'agent', 'name'], df_a)
@@ -135,23 +128,27 @@ with t3:
 
         if ae_col and as_col:
             df_a[as_col] = pd.to_numeric(df_a[as_col], errors='coerce')
+            # 4-5 is Positive, 3 and below is Negative
             df_a['Sentiment'] = df_a[as_col].apply(lambda x: "Positive" if x >= 4 else ("Negative" if x <= 3 else "Neutral"))
             
             m1, m2, m3 = st.columns(3)
             m1.metric("Total Audits", len(df_a))
             m2.metric("Avg Quality Score", f"{df_a[as_col].mean():.2f}")
             pos_rate = (len(df_a[df_a['Sentiment']=='Positive']) / len(df_a)) * 100 if len(df_a)>0 else 0
-            m3.metric("Positive Rating % (4-5 Star)", f"{pos_rate:.1f}%")
+            m3.metric("Positive Rating %", f"{pos_rate:.1f}%")
 
+            st.subheader("Executive Audit Summary")
             st.dataframe(df_a.groupby(ae_col).agg({as_col: ['count', 'mean']}).reset_index(), use_container_width=True)
+        else:
+            st.error("Audit sheet missing 'Executive' or 'Score' columns.")
     else:
-        st.info("ℹ️ Connect Audit Source in sidebar.")
+        st.info("ℹ️ Connect Audit Source in sidebar (Excel or Google Sheet).")
 
 # --- 5. PREDICTIONS (PERMANENT BOTTOM) ---
 st.markdown("---")
 st.subheader("🔮 Predictive Insights")
 p1, p2 = st.columns(2)
 with p1:
-    st.markdown('<div class="insight-card"><b>📅 Backlog Forecast</b><br>Tickets remaining: Based on Support Tracker data.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="insight-card"><b>📅 Backlog Forecast</b><br>Remaining Volume calculated based on Support Data.</div>', unsafe_allow_html=True)
 with p2:
-    st.markdown('<div class="insight-card"><b>🚀 Capacity Planning</b><br>Quality scores 4-5 are currently trending at a healthy rate.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="insight-card"><b>🚀 Capacity Planning</b><br>Current quality scores suggest stable executive performance.</div>', unsafe_allow_html=True)
