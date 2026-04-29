@@ -5,7 +5,7 @@ import base64
 from streamlit_gsheets import GSheetsConnection
 
 # --- 1. SETTINGS & BRANDING ---
-st.set_page_config(page_title="Primarc Pecan Portal", layout="wide")
+st.set_page_config(page_title="Primarc Pecan | Executive Hub", layout="wide")
 BRAND_ORANGE, BRAND_NAVY = "#F37021", "#101828"
 
 st.markdown(f"""
@@ -15,12 +15,12 @@ st.markdown(f"""
     div[data-testid="stMetric"] {{ background-color: #1D2939; border: 1px solid {BRAND_ORANGE}; border-radius: 10px; padding: 15px; }}
     [data-testid="stMetricValue"] {{ color: {BRAND_ORANGE} !important; font-weight: bold !important; }}
     .stTabs [aria-selected="true"] {{ background-color: {BRAND_ORANGE} !important; border-radius: 5px; }}
+    .stDataFrame {{ background-color: white; border-radius: 10px; }}
     </style>
     """, unsafe_allow_html=True)
 
 # --- 2. ENGINE HELPERS ---
 def find_col(targets, df):
-    """Aggressively finds columns even with trailing spaces or different casing."""
     if df is None or df.empty: return None
     cols = [str(c).strip().lower() for c in df.columns]
     for t in targets:
@@ -29,7 +29,6 @@ def find_col(targets, df):
     return None
 
 def parse_aht(val):
-    """Converts 00:04:22 or 04:22 to decimal minutes."""
     try:
         if pd.isna(val) or str(val).strip() in ["", "0", "nan"]: return 0
         s = str(val).strip().split(':')
@@ -39,7 +38,7 @@ def parse_aht(val):
     except: return 0
 
 # --- 3. SIDEBAR LOADERS ---
-st.sidebar.title("🔌 Data Sources")
+st.sidebar.title("🔌 Data Connectors")
 
 def fetch_data(label):
     st.sidebar.subheader(f"📂 {label}")
@@ -57,55 +56,67 @@ def fetch_data(label):
             return pd.read_csv(file) if file.name.endswith('.csv') else pd.read_excel(file)
     return None
 
-# Load Independent Dataframes
-df_perf_raw = fetch_data("Performance Tracker")
+df_p_raw = fetch_data("Performance Tracker")
 st.sidebar.markdown("---")
-df_audit_raw = fetch_data("Audit Tracker")
+df_a_raw = fetch_data("Audit Tracker")
 
 # --- 4. TABS ---
-tab1, tab2, tab3 = st.tabs(["📊 Performance Overview", "🕵️ Audit Tracker", "📋 System Logs"])
+tab1, tab2, tab3 = st.tabs(["📊 Performance Overview", "🕵️ Audit Tracker", "📋 Data Inspector"])
 
-# --- TAB 1: PERFORMANCE ---
+# --- TAB 1: PERFORMANCE OVERVIEW ---
 with tab1:
-    if df_perf_raw is not None:
-        df_p = df_perf_raw.copy()
-        # Mapping
+    if df_p_raw is not None:
+        df_p = df_p_raw.copy()
+        df_p.columns = [str(c).strip() for c in df_p.columns]
+        
+        # Mapping from your specific file source
         ag = find_col(['agent', 'executive'], df_p)
         cat = find_col(['category'], df_p)
-        aht = find_col(['aht', 'handling time'], df_p)
+        aht = find_col(['aht'], df_p)
 
-        st.title("🎧 Operations Overview")
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Total Tickets", len(df_p))
+        st.title("🎧 Operations Performance")
+        
+        # Filtering out rows where Category/Agent are missing (the "Unanswered" rows)
+        clean_df = df_p.dropna(subset=[cat, ag]) if cat and ag else df_p
+
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Total Tickets Handled", len(clean_df))
         
         if aht:
-            df_p['mins'] = df_p[aht].apply(parse_aht)
-            avg_val = df_p[df_p['mins'] > 0]['mins'].mean()
-            col2.metric("Avg Handling Time", f"{avg_val:.2f} min" if not pd.isna(avg_val) else "0.00 min")
+            clean_df['mins'] = clean_df[aht].apply(parse_aht)
+            avg_aht = clean_df[clean_df['mins'] > 0]['mins'].mean()
+            m2.metric("Avg Handling Time", f"{avg_aht:.2f} min" if not pd.isna(avg_aht) else "0.00 min")
         
         if cat:
-            col3.metric("Ticket Categories", df_p[cat].nunique())
+            m3.metric("Unique Categories", clean_df[cat].nunique())
 
-        # Charts
         c1, c2 = st.columns(2)
         with c1:
-            if ag: st.plotly_chart(px.pie(df_p, names=ag, hole=0.4, title="Agent Workload Share"), use_container_width=True)
+            if ag:
+                fig_ag = px.pie(clean_df, names=ag, hole=0.4, title="Ticket Share by Agent",
+                                color_discrete_sequence=px.colors.sequential.Oranges_r)
+                st.plotly_chart(fig_ag, use_container_width=True)
         with c2:
-            if cat: st.plotly_chart(px.bar(df_p[cat].value_counts().reset_index(), x='index', y=cat, 
-                                          title="Volume by Category", color_discrete_sequence=[BRAND_ORANGE]), use_container_width=True)
+            if cat:
+                fig_cat = px.bar(clean_df[cat].value_counts().reset_index(), x='index', y=cat, 
+                                 title="Volume by Category", color_discrete_sequence=[BRAND_ORANGE])
+                st.plotly_chart(fig_cat, use_container_width=True)
     else:
-        st.info("👋 Upload Performance Data in the sidebar to begin.")
+        st.info("👋 Use the sidebar to upload your 'Call Tracker' file.")
 
 # --- TAB 2: AUDIT TRACKER ---
 with tab2:
-    if df_audit_raw is not None:
-        df_a = df_audit_raw.copy()
+    if df_a_raw is not None:
+        df_a = df_a_raw.copy()
+        df_a.columns = [str(c).strip() for c in df_a.columns]
+        
         ag_a = find_col(['agent', 'executive'], df_a)
         cs_a = find_col(['csat', 'rating'], df_a)
 
-        st.title("🕵️ Quality Audit Summary")
+        st.title("🕵️ Quality Audit & CSAT Tracker")
+        
         if ag_a and cs_a:
-            # Sentiment Logic
+            # Rating Logic (4-5 = Positive, 1-3 = Negative)
             def get_sent(v):
                 v = str(v).lower()
                 if any(x in v for x in ['5', '4', 'excellent', 'good']): return "Positive"
@@ -115,36 +126,43 @@ with tab2:
             df_a['Sentiment'] = df_a[cs_a].apply(get_sent)
             valid = df_a[df_a['Sentiment'] != "No Rating"]
 
-            k1, k2 = st.columns(2)
-            k1.metric("Total CSAT Collected", len(valid))
-            k2.metric("Collection %", f"{(len(valid)/len(df_a)*100):.1f}%")
+            # Key Metrics
+            k1, k2, k3 = st.columns(3)
+            k1.metric("Total CSATs", len(valid))
+            k2.metric("Collection Rate", f"{(len(valid)/len(df_a)*100):.1f}%")
+            
+            # Extract Score for average
+            df_a['Score'] = pd.to_numeric(df_a[cs_a].astype(str).str.extract('(\d+)')[0], errors='coerce')
+            k3.metric("Avg Quality Score", f"{df_a['Score'].mean():.2f}")
 
-            # Agent Performance Table
-            st.subheader("Executive Deep-Dive")
+            # Agent Breakdown Table
+            st.subheader("Agent Performance Metrics")
             summary = df_a.groupby(ag_a).agg(
-                Calls=(df_a.columns[0], 'count'),
-                CSATs=('Sentiment', lambda x: (x != "No Rating").sum()),
+                Calls_Taken=(df_a.columns[0], 'count'),
+                CSATs_Collected=('Sentiment', lambda x: (x != "No Rating").sum()),
                 Positives=('Sentiment', lambda x: (x == "Positive").sum()),
                 Negatives=('Sentiment', lambda x: (x == "Negative").sum())
             ).reset_index()
-            summary['Coll %'] = (summary['CSATs'] / summary['Calls'] * 100).round(1)
-            summary.columns = ['Agent', 'Total Calls', 'CSATs', 'Positive(4-5)', 'Negative(1-3)', 'Coll %']
-            st.dataframe(summary.sort_values('Total Calls', ascending=False), use_container_width=True)
+            summary['Coll_Rate'] = (summary['CSATs_Collected'] / summary['Calls_Taken'] * 100).round(1)
+            summary.columns = ['Agent Name', 'Calls Taken', 'CSAT Collected', 'Positive (4-5)', 'Negative (1-3)', 'Collection %']
+            
+            st.dataframe(summary.sort_values('Calls Taken', ascending=False), use_container_width=True)
             
             if not valid.empty:
-                st.plotly_chart(px.pie(valid, names='Sentiment', hole=0.4, title="Overall Quality Score", 
+                st.plotly_chart(px.pie(valid, names='Sentiment', hole=0.4, title="Overall Sentiment Split", 
                                        color_discrete_map={'Positive':'#22C55E','Negative':'#EF4444'}), use_container_width=True)
         else:
-            st.error("Audit File Missing: Ensure it has 'Agent' and 'Csat' columns.")
+            st.error("Audit columns ('Agent' and 'Csat') not found in this file.")
     else:
-        st.info("👋 Upload Audit Tracker Data in the sidebar to begin.")
+        st.info("👋 Use the sidebar to upload your 'Audit Tracker' file.")
 
-# --- TAB 3: SYSTEM LOGS ---
+# --- TAB 3: DATA INSPECTOR ---
 with tab3:
-    st.subheader("Data Inspector")
-    if df_perf_raw is not None: 
-        st.write("Current Performance Data Headers:", list(df_perf_raw.columns))
-        st.dataframe(df_perf_raw.head(5))
-    if df_audit_raw is not None:
-        st.write("Current Audit Data Headers:", list(df_audit_raw.columns))
-        st.dataframe(df_audit_raw.head(5))
+    st.subheader("System Data Diagnostics")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.write("Performance Data Preview")
+        st.dataframe(df_p_raw)
+    with c2:
+        st.write("Audit Data Preview")
+        st.dataframe(df_a_raw)
