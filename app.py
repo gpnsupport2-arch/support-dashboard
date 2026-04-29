@@ -17,8 +17,7 @@ st.markdown(f"""
     }}
     [data-testid="stMetricValue"] {{ color: {ORANGE} !important; font-size: 32px !important; }}
     .stTabs [aria-selected="true"] {{ background-color: {ORANGE} !important; border-radius: 5px; color: white !important; }}
-    /* Styling for the tables to make them white and readable */
-    .stDataFrame {{ background-color: white; border-radius: 8px; padding: 5px; }}
+    .stDataFrame {{ background-color: white; border-radius: 8px; }}
     </style>
     """, unsafe_allow_html=True)
 
@@ -43,6 +42,7 @@ dfa_raw = load_source("Audit Data", "audit")
 # --- 3. SHARED MONTH FILTER ---
 selected_months = []
 if dfp_raw is not None:
+    # Standardize Column Names and Dates
     dfp_raw['Timestamp'] = pd.to_datetime(dfp_raw['Timestamp'], errors='coerce')
     dfp_raw['Month_Name'] = dfp_raw['Timestamp'].dt.strftime('%B')
     all_months = sorted(dfp_raw['Month_Name'].dropna().unique().tolist())
@@ -66,26 +66,21 @@ with tab1:
         res_count = len(dfp[dfp['Ticket status'].isin(['Closed', 'Resolved'])])
         m4.metric("Resolved/Closed", f"{res_count:,}")
 
-        st.subheader("👨‍💻 Executive Performance & Highlighted Daily Productivity")
+        # --- CONSOLIDATED PERFORMANCE TABLE (IMAGE 3 STYLE) ---
+        st.subheader("👨‍💻 Executive Performance & Daily Productivity")
         if 'Email Address' in dfp.columns and not dfp.empty:
-            # 1. Base Summary
+            # 1. Base Summary (Total by Channel)
             base_summary = dfp.groupby(['Email Address', 'Channel']).size().unstack(fill_value=0)
             
-            # 2. Daily Pivot (Converted to String for Table/JSON safety)
-            dfp['Date_Str'] = dfp['Timestamp'].dt.strftime('%d-%b') 
+            # 2. Daily Pivot (Dates as Columns)
+            dfp['Date_Str'] = dfp['Timestamp'].dt.strftime('%Y-%m-%d') # Fixed JSON Serializer error
             daily_pivot = dfp.groupby(['Email Address', 'Date_Str']).size().unstack(fill_value=0)
             
-            # 3. Merge
+            # 3. Join them together
             final_perf_table = base_summary.join(daily_pivot, how='left').reset_index()
-            
-            # --- HIGHLIGHTING LOGIC ---
-            def highlight_productivity(s):
-                # Colors the background of the date columns to make them stand out
-                return ['background-color: #fdf2e9; font-weight: bold' if '-' in str(col) else '' for col in final_perf_table.columns]
+            st.dataframe(final_perf_table, use_container_width=True)
 
-            st.dataframe(final_perf_table.style.apply(highlight_productivity, axis=1), use_container_width=True)
-
-        # Charts
+        # Charts Row
         c1, c2 = st.columns(2)
         with c1:
             st.plotly_chart(px.pie(dfp, names='Channel', hole=0.4, title="Segment Split", color_discrete_sequence=[ORANGE, "#444"]), use_container_width=True)
@@ -106,6 +101,7 @@ with tab2:
 
         st.title("🕵️ Quality Audit Deep-Dive")
         
+        # Sentiment logic
         def get_sent(v):
             v = str(v).lower()
             if any(x in v for x in ['5', '4', 'positive']): return "Positive"
@@ -114,6 +110,7 @@ with tab2:
         
         dfa['Sentiment'] = dfa['Csat'].apply(get_sent)
 
+        # AUDIT TABLE: Executive Name | Total Calls | CSAT Collected | Pos | Neg | % Calculations
         audit_table = dfa.groupby('Executive Name').agg(
             Total_Calls_Taken=('Ticket', 'count'),
             CSAT_Collected=('Sentiment', lambda x: (x != "No Rating").sum()),
@@ -121,13 +118,13 @@ with tab2:
             Negative_CSAT=('Sentiment', lambda x: (x == "Negative").sum())
         ).reset_index()
 
-        # Fix Collection % logic
         audit_table['Positive % (vs CSAT)'] = (audit_table['Positive_CSAT'] / audit_table['CSAT_Collected'] * 100).fillna(0).round(1).astype(str) + '%'
-        audit_table['Collection % (vs Total)'] = (audit_table['CSAT_Collected'] / audit_table['Total_Calls_Taken'] * 100).fillna(0).round(1).astype(str) + '%'
+        audit_table['Collection % (vs Total)'] = (audit_summary['CSAT_Collected'] / audit_summary['Total_Calls_Taken'] * 100).fillna(0).round(1).astype(str) + '%'
 
-        # Style Audit Table
-        st.dataframe(audit_table.style.highlight_max(subset=['Positive_CSAT'], color='#d4edda'), use_container_width=True)
+        st.dataframe(audit_table, use_container_width=True)
         
         valid = dfa[dfa['Sentiment'] != "No Rating"]
         if not valid.empty:
             st.plotly_chart(px.pie(valid, names='Sentiment', hole=0.5, title="Quality Split", color_discrete_map={'Positive':'#22C55E','Negative':'#EF4444'}), use_container_width=True)
+    else:
+        st.info("Upload Audit Data to begin.")
