@@ -152,7 +152,7 @@ with tab2:
             ).reset_index()
 
             # Percentage Calculations
-            audit_summary['Pos CSAT % (vs Collected)'] = (audit_summary['CSAT'] / audit_summary['CSAT_Collected'] * 100).fillna(0).round(1).astype(str) + '%'
+            audit_summary['Pos CSAT % (vs Collected)'] = (audit_summary['PositiveCSAT'] / audit_summary['CSAT_Collected'] * 100).fillna(0).round(1).astype(str) + '%'
             audit_summary['Collection % (vs Total)'] = (audit_summary['CSAT_Collected'] / audit_summary['Total_Calls_Taken'] * 100).fillna(0).round(1).astype(str) + '%'
 
             st.subheader("Executive Performance Audit Table")
