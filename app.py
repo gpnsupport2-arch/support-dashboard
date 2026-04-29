@@ -29,3 +29,27 @@ st.markdown(f"""
 
 # Create the Tabs in the UI
 tab1, tab2, tab3 = st.tabs(["📊 Performance Overview", "🕵️ Audit Tracker", "📋 Data Logs"])
+
+with tab1:
+    if df_perf_raw is not None:
+        st.title("🎧 Operations Performance")
+        df_p = df_perf_raw.copy()
+        
+        # UI Metrics Row
+        m1, m2 = st.columns(2)
+        m1.metric("Total Tickets Handled", len(df_p))
+        
+        # AHT Calculation Logic
+        if 'AHT' in df_p.columns:
+            # Converts HH:MM:SS to numeric minutes
+            df_p['mins'] = df_p['AHT'].apply(parse_aht) 
+            avg_val = df_p[df_p['mins'] > 0]['mins'].mean()
+            m2.metric("Avg Handling Time", f"{avg_val:.2f} min")
+
+        # Visualization UI
+        c1, c2 = st.columns(2)
+        with c1:
+            st.plotly_chart(px.pie(df_p, names='Agent', hole=0.4, title="Agent Share"), use_container_width=True)
+        with c2:
+            st.plotly_chart(px.bar(df_p['Category'].value_counts().reset_index(), 
+                                  x='index', y='Category', title="Volume by Category"), use_container_width=True)
